@@ -5,6 +5,8 @@ use std::path::PathBuf;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
+use crate::i18n::Lang;
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct GameConfig {
     pub name: String,
@@ -33,8 +35,21 @@ struct ConfigFile {
     games: Vec<GameConfig>,
 }
 
+#[derive(Serialize, Deserialize)]
+struct PrefsFile {
+    lang: String,
+}
+
+impl Default for PrefsFile {
+    fn default() -> Self {
+        Self { lang: "zh".to_string() }
+    }
+}
+
 pub struct ConfigStore {
     path: PathBuf,
+    #[allow(dead_code)]
+    prefs_path: PathBuf,
     games: Vec<GameConfig>,
 }
 
@@ -44,6 +59,7 @@ impl ConfigStore {
             .expect("could not determine project directories");
         let config_dir = proj_dirs.config_dir().to_path_buf();
         let path = config_dir.join("games.json");
+        let prefs_path = config_dir.join("prefs.json");
 
         let games = if path.exists() {
             match fs::read_to_string(&path) {
@@ -65,7 +81,32 @@ impl ConfigStore {
             Vec::new()
         };
 
-        ConfigStore { path, games }
+        ConfigStore { path, prefs_path, games }
+    }
+
+    pub fn load_lang() -> Lang {
+        let proj_dirs = ProjectDirs::from("com", "proton-launch", "proton-launch")
+            .expect("could not determine project directories");
+        let prefs_path = proj_dirs.config_dir().join("prefs.json");
+        if prefs_path.exists() {
+            if let Ok(content) = fs::read_to_string(&prefs_path) {
+                if let Ok(prefs) = serde_json::from_str::<PrefsFile>(&content) {
+                    return Lang::from_str(&prefs.lang);
+                }
+            }
+        }
+        Lang::Zh
+    }
+
+    pub fn save_lang(lang: Lang) {
+        let proj_dirs = ProjectDirs::from("com", "proton-launch", "proton-launch")
+            .expect("could not determine project directories");
+        let config_dir = proj_dirs.config_dir();
+        let prefs_path = config_dir.join("prefs.json");
+        if let Ok(json) = serde_json::to_string(&PrefsFile { lang: lang.as_str().to_string() }) {
+            let _ = fs::create_dir_all(config_dir);
+            let _ = fs::write(&prefs_path, json);
+        }
     }
 
     pub fn games(&self) -> &[GameConfig] {

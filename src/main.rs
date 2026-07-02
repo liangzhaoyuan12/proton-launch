@@ -1,15 +1,26 @@
 mod app;
 mod config;
+mod i18n;
 mod runner;
 
 use eframe::egui::{FontFamily, ViewportBuilder};
 use std::sync::Arc;
 
 fn main() -> eframe::Result<()> {
+    let icon = eframe::icon_data::from_png_bytes(include_bytes!("../icon.png"))
+        .map_err(|e| eprintln!("icon load error: {e}"))
+        .ok();
+
+    let mut viewport = ViewportBuilder::default()
+        .with_inner_size([900.0, 640.0])
+        .with_title("Proton Launch Manager")
+        .with_app_id("proton-launch");
+    if let Some(ico) = icon {
+        viewport.icon = Some(Arc::new(ico));
+    }
+
     let options = eframe::NativeOptions {
-        viewport: ViewportBuilder::default()
-            .with_inner_size([900.0, 640.0])
-            .with_title("Proton Launch Manager"),
+        viewport,
         ..Default::default()
     };
 

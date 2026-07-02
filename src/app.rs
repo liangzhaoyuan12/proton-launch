@@ -5,6 +5,7 @@ use eframe::egui;
 use egui::{CollapsingHeader, ScrollArea, SidePanel, TopBottomPanel};
 
 use crate::config::{ConfigStore, GameConfig};
+use crate::i18n::{t, Lang};
 use crate::runner::Runner;
 
 // ─── env var definitions ────────────────────────────────────────────────
@@ -49,13 +50,14 @@ struct EnvVarDef {
 }
 
 struct EnvCategory {
-    name: &'static str,
+    name_zh: &'static str,
+    name_en: &'static str,
     vars: &'static [EnvVarDef],
 }
 
 static ENV_CATEGORIES: &[EnvCategory] = &[
     EnvCategory {
-        name: "核心 (Core)",
+        name_zh: "核心 (Core)", name_en: "Core",
         vars: &[
             EnvVarDef { key: "WINEPREFIX", label: "Wine Prefix 路径" },
             EnvVarDef { key: "GAMEID", label: "游戏 ID" },
@@ -64,7 +66,7 @@ static ENV_CATEGORIES: &[EnvCategory] = &[
         ],
     },
     EnvCategory {
-        name: "DLL / Windows 环境",
+        name_zh: "DLL / Windows 环境", name_en: "DLL / Windows",
         vars: &[
             EnvVarDef { key: "WINEDLLOVERRIDES", label: "DLL 覆盖 (如 d3d9=n,b)" },
             EnvVarDef { key: "WINEDLLPATH", label: "额外 DLL 搜索路径" },
@@ -73,7 +75,7 @@ static ENV_CATEGORIES: &[EnvCategory] = &[
         ],
     },
     EnvCategory {
-        name: "图形渲染 (Graphics)",
+        name_zh: "图形渲染", name_en: "Graphics",
         vars: &[
             EnvVarDef { key: "WINE_D3D_CONFIG", label: "D3D 配置 (renderer=vulkan 等)" },
             EnvVarDef { key: "WINE_DO_NOT_CREATE_DXGI_DEVICE_MANAGER", label: "修复过场动画色块 (1=启用)" },
@@ -91,14 +93,14 @@ static ENV_CATEGORIES: &[EnvCategory] = &[
         ],
     },
     EnvCategory {
-        name: "Wayland",
+        name_zh: "Wayland", name_en: "Wayland",
         vars: &[
             EnvVarDef { key: "PROTON_ENABLE_WAYLAND", label: "启用 Wayland (0/1)" },
             EnvVarDef { key: "PROTON_ENABLE_HDR", label: "启用 HDR (0/1)" },
         ],
     },
     EnvCategory {
-        name: "同步机制 (Sync)",
+        name_zh: "同步机制", name_en: "Sync",
         vars: &[
             EnvVarDef { key: "WINEESYNC", label: "esync (0/1)" },
             EnvVarDef { key: "WINEFSYNC", label: "fsync (0/1)" },
@@ -106,7 +108,7 @@ static ENV_CATEGORIES: &[EnvCategory] = &[
         ],
     },
     EnvCategory {
-        name: "内存和进程 (Memory/CPU)",
+        name_zh: "内存和进程", name_en: "Memory/CPU",
         vars: &[
             EnvVarDef { key: "WINE_LARGE_ADDRESS_AWARE", label: "32位大内存支持 (1=启用)" },
             EnvVarDef { key: "WINE_HEAP_DELAY_FREE", label: "延迟堆释放 (1=启用)" },
@@ -114,7 +116,7 @@ static ENV_CATEGORIES: &[EnvCategory] = &[
         ],
     },
     EnvCategory {
-        name: "音频 (Audio)",
+        name_zh: "音频", name_en: "Audio",
         vars: &[
             EnvVarDef { key: "PULSE_LATENCY_MSEC", label: "PulseAudio 延迟 (ms)" },
             EnvVarDef { key: "SDL_AUDIODRIVER", label: "SDL 音频后端 (pulse/alsa/pipewire)" },
@@ -122,14 +124,14 @@ static ENV_CATEGORIES: &[EnvCategory] = &[
         ],
     },
     EnvCategory {
-        name: "Vulkan",
+        name_zh: "Vulkan", name_en: "Vulkan",
         vars: &[
             EnvVarDef { key: "VK_ICD_FILENAMES", label: "Vulkan ICD 文件路径" },
             EnvVarDef { key: "AMD_VULKAN_ICD", label: "AMD 驱动选择 (RADV/AMDVLK)" },
         ],
     },
     EnvCategory {
-        name: "Mesa / OpenGL",
+        name_zh: "Mesa / OpenGL", name_en: "Mesa / OpenGL",
         vars: &[
             EnvVarDef { key: "MESA_GL_VERSION_OVERRIDE", label: "OpenGL 版本 (如 4.6)" },
             EnvVarDef { key: "MESA_GLSL_VERSION_OVERRIDE", label: "GLSL 版本 (如 460)" },
@@ -139,7 +141,7 @@ static ENV_CATEGORIES: &[EnvCategory] = &[
         ],
     },
     EnvCategory {
-        name: "NVIDIA",
+        name_zh: "NVIDIA", name_en: "NVIDIA",
         vars: &[
             EnvVarDef { key: "__GL_THREADED_OPTIMIZATIONS", label: "OpenGL 多线程 (0/1)" },
             EnvVarDef { key: "__GL_SHADER_DISK_CACHE", label: "着色器缓存 (0/1)" },
@@ -150,7 +152,7 @@ static ENV_CATEGORIES: &[EnvCategory] = &[
         ],
     },
     EnvCategory {
-        name: "DLSS / FSR / XeSS",
+        name_zh: "DLSS / FSR / XeSS", name_en: "DLSS / FSR / XeSS",
         vars: &[
             EnvVarDef { key: "PROTON_DLSS_UPGRADE", label: "DLSS 自动更新 (0/1)" },
             EnvVarDef { key: "PROTON_DLSS_INDICATOR", label: "DLSS 指示器 (0/1)" },
@@ -161,7 +163,7 @@ static ENV_CATEGORIES: &[EnvCategory] = &[
         ],
     },
     EnvCategory {
-        name: "性能监控 (Performance)",
+        name_zh: "性能监控", name_en: "Performance",
         vars: &[
             EnvVarDef { key: "GALLIUM_HUD", label: "Gallium3D HUD (fps,cpu 等)" },
             EnvVarDef { key: "MANGOHUD", label: "MangoHud (0=禁用, 1=启用)" },
@@ -170,7 +172,7 @@ static ENV_CATEGORIES: &[EnvCategory] = &[
         ],
     },
     EnvCategory {
-        name: "输入设备 (Input)",
+        name_zh: "输入设备", name_en: "Input",
         vars: &[
             EnvVarDef { key: "PROTON_PREFER_SDL", label: "优先使用 SDL 输入 (0/1)" },
             EnvVarDef { key: "SDL_GAMECONTROLLERCONFIG", label: "手柄映射配置" },
@@ -178,13 +180,13 @@ static ENV_CATEGORIES: &[EnvCategory] = &[
         ],
     },
     EnvCategory {
-        name: "字体 (Font)",
+        name_zh: "字体", name_en: "Font",
         vars: &[
             EnvVarDef { key: "FREETYPE_PROPERTIES", label: "FreeType 渲染配置" },
         ],
     },
     EnvCategory {
-        name: "其他 (Other)",
+        name_zh: "其他", name_en: "Other",
         vars: &[
             EnvVarDef { key: "COPYPREFIX", label: "复制前缀 (0/1)" },
             EnvVarDef { key: "SteamDeck", label: "SteamDeck 模式 (0/1)" },
@@ -215,6 +217,7 @@ pub struct ProtonApp {
     // data
     store: ConfigStore,
     runner: Runner,
+    pub lang: Lang,
 
     // selection / editing
     selected_idx: Option<usize>,
@@ -227,6 +230,9 @@ pub struct ProtonApp {
     status: String,
     status_is_err: bool,
 
+    // about dialog
+    show_about: bool,
+
     // running processes (index → state)
     running: HashMap<usize, RunningState>,
 }
@@ -236,14 +242,17 @@ impl Default for ProtonApp {
         let store = ConfigStore::new();
         let runner = Runner::new();
 
+        let default_lang = ConfigStore::load_lang();
         let mut app = ProtonApp {
             store,
             runner,
+            lang: default_lang,
             selected_idx: None,
             custom_key: String::new(),
             custom_value: String::new(),
-            status: "就绪".to_string(),
+            status: match default_lang { Lang::Zh => "就绪".into(), Lang::En => "Ready".into() },
             status_is_err: false,
+            show_about: false,
             running: HashMap::new(),
         };
 
@@ -271,6 +280,18 @@ impl eframe::App for ProtonApp {
             ui.horizontal(|ui| {
                 ui.heading("Proton Launch Manager");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let lang_label = match self.lang { Lang::Zh => "EN", Lang::En => "中文" };
+                    if ui.button(lang_label).clicked() {
+                        let new = match self.lang {
+                            Lang::Zh => Lang::En,
+                            Lang::En => Lang::Zh,
+                        };
+                        self.lang = new;
+                        ConfigStore::save_lang(new);
+                    }
+                    if ui.button(self.tr("关于", "About")).clicked() {
+                        self.show_about = true;
+                    }
                     ui.colored_label(
                         egui::Color32::GRAY,
                         &format!("v{}", env!("CARGO_PKG_VERSION")),
@@ -288,7 +309,8 @@ impl eframe::App for ProtonApp {
             };
             ui.colored_label(color, &self.status);
             if !self.running.is_empty() {
-                ui.label(format!("运行中: {}", self.running.len()));
+                let label = format!("{}: {}", t!(self.lang, "运行中", "Running"), self.running.len());
+                ui.label(label);
             }
         });
 
@@ -298,13 +320,13 @@ impl eframe::App for ProtonApp {
             .default_width(200.0)
             .show(ctx, |ui| {
                 ui.vertical(|ui| {
-                    ui.strong("游戏列表");
+                    ui.strong(self.tr("游戏列表", "Games"));
 
                     ui.horizontal(|ui| {
-                        if ui.button("＋ 添加").clicked() {
+                        if ui.button(self.tr("＋ 添加", "＋ Add")).clicked() {
                             self.add_game_dialog();
                         }
-                        if ui.button("✕ 删除").clicked() {
+                        if ui.button(self.tr("✕ 删除", "✕ Delete")).clicked() {
                             self.delete_selected();
                         }
                     });
@@ -321,7 +343,7 @@ impl eframe::App for ProtonApp {
                                 let selected = self.selected_idx == Some(i);
                                 let running = self.running.contains_key(&i);
                                 let label = if game.name.is_empty() {
-                                    format!("未命名 #{}", i + 1)
+                                    format!("{} #{}", self.tr("未命名", "Unnamed"), i + 1)
                                 } else {
                                     game.name.clone()
                                 };
@@ -335,7 +357,7 @@ impl eframe::App for ProtonApp {
                                     .clicked()
                                 {
                                     to_select = Some(i);
-                                    self.update_status(&format!("已选择: {}", label), false);
+                                    self.update_status(&format!("{}: {}", self.tr("已选择", "Selected"), label), false);
                                 }
                             }
                         });
@@ -363,22 +385,22 @@ impl eframe::App for ProtonApp {
 
                     ui.horizontal(|ui| {
                         if running_here.is_some() {
-                            ui.colored_label(egui::Color32::YELLOW, "▶ 运行中");
+                            ui.colored_label(egui::Color32::YELLOW, self.tr("▶ 运行中", "▶ Running"));
                         }
 
                         if ui
-                            .button("💾 保存配置")
+                            .button(self.tr("💾 保存配置", "💾 Save Config"))
                             .clicked()
                         {
                             self.store.update_game(idx, game.clone());
                             match self.store.save() {
-                                Ok(_) => self.update_status("配置已保存", false),
-                                Err(e) => self.update_status(&format!("保存失败: {e}"), true),
+                                Ok(_) => self.update_status(self.tr("配置已保存", "Config saved"), false),
+                                Err(e) => self.update_status(&format!("{}: {e}", self.tr("保存失败", "Save failed")), true),
                             }
                         }
 
                         if ui
-                            .button("▶ 运行")
+                            .button(self.tr("▶ 运行", "▶ Run"))
                             .clicked()
                         {
                             self.store.update_game(idx, game.clone());
@@ -388,7 +410,7 @@ impl eframe::App for ProtonApp {
                         if let Some(pid) = running_here {
                             ui.separator();
                             ui.label(format!("PID: {pid}"));
-                            if ui.button("⏹ 停止").clicked() {
+                            if ui.button(self.tr("⏹ 停止", "⏹ Stop")).clicked() {
                                 self.kill_running(idx);
                             }
                         }
@@ -413,15 +435,15 @@ impl eframe::App for ProtonApp {
                     // auto-save to memory on every frame
                     self.store.update_game(idx, game);
                 } else {
-                    ui.label("请选择一个游戏进行配置");
+                    ui.label(self.tr("请选择一个游戏进行配置", "Select a game to configure"));
                 }
             } else {
                 ui.vertical_centered(|ui| {
                     ui.add_space(40.0);
                     ui.heading("Proton Launch Manager");
-                    ui.label("欢迎使用！");
-                    ui.label("点击左侧「＋ 添加」创建一个新游戏配置，");
-                    ui.label("或选择一个已有游戏进行编辑。");
+                    ui.label(self.tr("欢迎使用！", "Welcome!"));
+                    ui.label(self.tr("点击左侧「＋ 添加」创建一个新游戏配置，", "Click 「＋ Add」 to create a new game config,"));
+                    ui.label(self.tr("或选择一个已有游戏进行编辑。", "or select an existing game to edit."));
                 });
             }
         });
@@ -430,28 +452,63 @@ impl eframe::App for ProtonApp {
         if !self.running.is_empty() {
             ctx.request_repaint_after(std::time::Duration::from_millis(200));
         }
+
+        // ── about dialog ──────────────────────────────────────────────────
+        if self.show_about {
+            egui::Window::new(self.tr("关于", "About"))
+                .resizable(false)
+                .collapsible(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.heading("Proton Launch Manager");
+                        ui.label(format!("v{}", env!("CARGO_PKG_VERSION")));
+                        ui.add_space(8.0);
+                        ui.label(self.tr("作者：liangzhaoyuan12", "Author: liangzhaoyuan12"));
+                        ui.add_space(4.0);
+                        ui.label(self.tr("开源协议：MIT", "License: MIT"));
+                        ui.add_space(8.0);
+                        ui.hyperlink_to(
+                            self.tr("Gitee 仓库", "Gitee Repo"),
+                            "https://gitee.com/liangzhaoyuan12/proton-launch",
+                        );
+                        ui.hyperlink_to(
+                            self.tr("GitHub 仓库", "GitHub Repo"),
+                            "https://github.com/liangzhaoyuan12/proton-launch",
+                        );
+                        ui.add_space(12.0);
+                        if ui.button(self.tr("关闭", "Close")).clicked() {
+                            self.show_about = false;
+                        }
+                    });
+                });
+        }
     }
 }
 
 impl ProtonApp {
+    fn tr(&self, zh: &'static str, en: &'static str) -> &'static str {
+        match self.lang { Lang::Zh => zh, Lang::En => en }
+    }
+
     // ─── UI: game config basic fields ────────────────────────────────────
 
     fn show_game_config(&mut self, ui: &mut egui::Ui, game: &mut GameConfig) -> bool {
         let mut changed = false;
 
-        ui.strong("基本设置");
+        ui.strong(self.tr("基本设置", "Basic Settings"));
 
         ui.horizontal(|ui| {
-            ui.label("名称:");
+            ui.label(self.tr("名称:", "Name:"));
             changed |= ui.text_edit_singleline(&mut game.name).changed();
         });
 
         ui.horizontal(|ui| {
-            ui.label("可执行文件:");
+            ui.label(self.tr("可执行文件:", "Executable:"));
             changed |= ui.text_edit_singleline(&mut game.executable).changed();
-            if ui.button("浏览...").clicked() {
+            if ui.button(self.tr("浏览...", "Browse...")).clicked() {
                 if let Some(path) = rfd::FileDialog::new()
-                    .set_title("选择可执行文件")
+                    .set_title(self.tr("选择可执行文件", "Select executable"))
                     .pick_file()
                 {
                     game.executable = path.display().to_string();
@@ -461,16 +518,16 @@ impl ProtonApp {
         });
 
         ui.horizontal(|ui| {
-            ui.label("命令行参数:");
+            ui.label(self.tr("命令行参数:", "Arguments:"));
             changed |= ui.text_edit_singleline(&mut game.args).changed();
         });
 
         ui.horizontal(|ui| {
-            ui.label("工作目录:");
+            ui.label(self.tr("工作目录:", "Work Dir:"));
             changed |= ui.text_edit_singleline(&mut game.work_dir).changed();
-            if ui.button("浏览...").clicked() {
+            if ui.button(self.tr("浏览...", "Browse...")).clicked() {
                 if let Some(dir) = rfd::FileDialog::new()
-                    .set_title("选择工作目录")
+                    .set_title(self.tr("选择工作目录", "Select work directory"))
                     .pick_folder()
                 {
                     game.work_dir = dir.display().to_string();
@@ -480,15 +537,15 @@ impl ProtonApp {
         });
 
         ui.horizontal(|ui| {
-            ui.label("Proton 版本:");
+            ui.label(self.tr("Proton 版本:", "Proton Version:"));
             let mut proton_val = game.env_vars.get("PROTONPATH").cloned().unwrap_or_default();
             changed |= ui.add(
                 egui::TextEdit::singleline(&mut proton_val)
-                    .hint_text("路径/版本号 (如 GE-Proton9-5)")
+                    .hint_text(self.tr("路径/版本号 (如 GE-Proton9-5)", "path/version (e.g. GE-Proton9-5)"))
             ).changed();
-            if ui.button("浏览...").clicked() {
+            if ui.button(self.tr("浏览...", "Browse...")).clicked() {
                 if let Some(dir) = rfd::FileDialog::new()
-                    .set_title("选择 Proton 目录")
+                    .set_title(self.tr("选择 Proton 目录", "Select Proton directory"))
                     .pick_folder()
                 {
                     proton_val = dir.display().to_string();
@@ -503,15 +560,15 @@ impl ProtonApp {
         });
 
         ui.horizontal(|ui| {
-            ui.label("修改器/注入器:");
+            ui.label(self.tr("修改器/注入器:", "Modder/Injector:"));
             let mut debug_val = game.env_vars.get("PROTON_REMOTE_DEBUG_CMD").cloned().unwrap_or_default();
             changed |= ui.add(
                 egui::TextEdit::singleline(&mut debug_val)
-                    .hint_text("可执行文件路径")
+                    .hint_text(self.tr("可执行文件路径", "executable path"))
             ).changed();
-            if ui.button("浏览...").clicked() {
+            if ui.button(self.tr("浏览...", "Browse...")).clicked() {
                 if let Some(f) = rfd::FileDialog::new()
-                    .set_title("选择修改器/注入器")
+                    .set_title(self.tr("选择修改器/注入器", "Select modder/injector"))
                     .pick_file()
                 {
                     debug_val = f.display().to_string();
@@ -526,10 +583,12 @@ impl ProtonApp {
         });
 
         ui.add_space(8.0);
-        ui.strong("渲染器设置");
-        ui.label("启动参数，非所有游戏都支持");
+        ui.strong(self.tr("渲染器设置", "Renderer Settings"));
+        ui.label(self.tr("启动参数，非所有游戏都支持", "Launch args, not all games support this"));
         let renderers = ["", "-dx11", "-dx12", "-opengl", "-vulkan"];
-        let labels = ["不指定", "DirectX 11 (-dx11)", "DirectX 12 (-dx12)", "OpenGL (-opengl)", "Vulkan (-vulkan)"];
+        let labels_zh = ["不指定", "DirectX 11 (-dx11)", "DirectX 12 (-dx12)", "OpenGL (-opengl)", "Vulkan (-vulkan)"];
+        let labels_en = ["Auto", "DirectX 11 (-dx11)", "DirectX 12 (-dx12)", "OpenGL (-opengl)", "Vulkan (-vulkan)"];
+        let labels = match self.lang { Lang::Zh => &labels_zh, Lang::En => &labels_en };
         let mut sel = renderers.iter().position(|r| *r == game.renderer).unwrap_or(0);
         egui::ComboBox::from_id_salt("renderer_selector")
             .selected_text(labels[sel])
@@ -549,8 +608,8 @@ impl ProtonApp {
     // ─── UI: environment variables (categorized) ─────────────────────────
 
     fn show_env_vars(&mut self, ui: &mut egui::Ui, game: &mut GameConfig) {
-        ui.strong("环境变量");
-        ui.label("勾选并填写需要的环境变量，留空则不设置");
+        ui.strong(self.tr("环境变量", "Environment Variables"));
+        ui.label(self.tr("勾选并填写需要的环境变量，留空则不设置", "Check and fill the env vars you need, leave empty to unset"));
         ui.add_space(4.0);
 
         for category in ENV_CATEGORIES {
@@ -561,8 +620,9 @@ impl ProtonApp {
                 .count();
 
             let header_label = format!(
-                "{}  (已设置 {}/{})",
-                category.name,
+                "{}  ({} {}/{})",
+                self.tr(category.name_zh, category.name_en),
+                self.tr("已设置", "set"),
                 count,
                 category.vars.len()
             );
@@ -646,7 +706,7 @@ impl ProtonApp {
     fn show_custom_env_vars(&mut self, ui: &mut egui::Ui, game: &mut GameConfig) -> bool {
         let mut changed = false;
 
-        CollapsingHeader::new("自定义环境变量")
+        CollapsingHeader::new(self.tr("自定义环境变量", "Custom Env Vars"))
             .default_open(false)
             .show(ui, |ui| {
                 // list existing custom vars
@@ -663,7 +723,7 @@ impl ProtonApp {
                     .collect();
 
                 if custom_keys.is_empty() {
-                    ui.colored_label(egui::Color32::GRAY, "暂无自定义变量");
+                    ui.colored_label(egui::Color32::GRAY, self.tr("暂无自定义变量", "No custom vars"));
                 } else {
                     for key in &custom_keys {
                         let mut val = game.env_vars.get(key.as_str()).cloned().unwrap_or_default();
@@ -685,14 +745,16 @@ impl ProtonApp {
 
                 // add new custom var
                 ui.horizontal(|ui| {
-                    ui.label("新增:");
+                    let hint_key = self.tr("变量名", "key");
+                    let hint_val = self.tr("值", "value");
+                    ui.label(self.tr("新增:", "New:"));
                     changed |= ui
-                        .add(egui::TextEdit::singleline(&mut self.custom_key).hint_text("变量名"))
+                        .add(egui::TextEdit::singleline(&mut self.custom_key).hint_text(hint_key))
                         .changed();
                     changed |= ui
-                        .add(egui::TextEdit::singleline(&mut self.custom_value).hint_text("值"))
+                        .add(egui::TextEdit::singleline(&mut self.custom_value).hint_text(hint_val))
                         .changed();
-                    if ui.button("添加").clicked() && !self.custom_key.is_empty() {
+                    if ui.button(self.tr("添加", "Add")).clicked() && !self.custom_key.is_empty() {
                         game.env_vars
                             .insert(self.custom_key.clone(), self.custom_value.clone());
                         self.custom_key.clear();
@@ -709,14 +771,14 @@ impl ProtonApp {
 
     fn add_game_dialog(&mut self) {
         let count = self.store.games().len();
-        let name = format!("新游戏 #{}", count + 1);
+        let name = format!("{} #{}", self.tr("新游戏", "New Game"), count + 1);
         let game = GameConfig::new(&name);
         self.store.add_game(game);
         let idx = self.store.games().len() - 1;
         self.selected_idx = Some(idx);
-        self.update_status(&format!("已添加: {name}"), false);
+        self.update_status(&format!("{}: {name}", self.tr("已添加", "Added")), false);
         if let Err(e) = self.store.save() {
-            self.update_status(&format!("保存失败: {e}"), true);
+            self.update_status(&format!("{}: {e}", self.tr("保存失败", "Save failed")), true);
         }
     }
 
@@ -734,9 +796,9 @@ impl ProtonApp {
                     idx
                 })
             };
-            self.update_status(&format!("已删除: {name}"), false);
+            self.update_status(&format!("{}: {name}", self.tr("已删除", "Deleted")), false);
             if let Err(e) = self.store.save() {
-                self.update_status(&format!("保存失败: {e}"), true);
+                self.update_status(&format!("{}: {e}", self.tr("保存失败", "Save failed")), true);
             }
         }
     }
@@ -751,7 +813,7 @@ impl ProtonApp {
         };
 
         if game.executable.is_empty() {
-            self.update_status("请先选择可执行文件", true);
+            self.update_status(self.tr("请先选择可执行文件", "Please select an executable first"), true);
             return;
         }
 
@@ -791,18 +853,21 @@ impl ProtonApp {
                 });
 
                 self.update_status(
-                    &format!("已启动: {} (PID {})", game.name, pid),
+                    &format!("{}: {} (PID {})", self.tr("已启动", "Launched"), game.name, pid),
                     false,
                 );
             }
             Err(e) => {
-                self.update_status(&format!("启动失败: {e}"), true);
+                self.update_status(&format!("{}: {e}", self.tr("启动失败", "Launch failed")), true);
             }
         }
     }
 
     fn poll_running(&mut self) {
         let mut done_idxs: Vec<(usize, String, bool)> = Vec::new();
+        let exited_ok = self.tr("已正常退出", "exited normally");
+        let exited_code = self.tr("退出，退出码:", "exited with code");
+        let process_err = self.tr("进程错误", "process error");
 
         for (&idx, running) in &mut self.running {
             if running.done {
@@ -816,9 +881,9 @@ impl ProtonApp {
                         .map(|g| g.name.clone())
                         .unwrap_or_default();
                     let msg = if code == 0 {
-                        format!("「{name}」已正常退出")
+                        format!("「{name}」{exited_ok}")
                     } else {
-                        format!("「{name}」退出，退出码: {code}")
+                        format!("「{name}」{exited_code} {code}")
                     };
                     done_idxs.push((idx, msg, code != 0));
                 }
@@ -828,7 +893,7 @@ impl ProtonApp {
                     let name = self.store.games().get(idx)
                         .map(|g| g.name.clone())
                         .unwrap_or_default();
-                    done_idxs.push((idx, format!("「{name}」进程错误: {e}"), true));
+                    done_idxs.push((idx, format!("「{name}」{process_err}: {e}"), true));
                 }
             }
         }
@@ -857,7 +922,7 @@ impl ProtonApp {
             let name = self.store.games().get(idx)
                 .map(|g| g.name.clone())
                 .unwrap_or_default();
-            self.update_status(&format!("「{name}」进程已终止"), false);
+            self.update_status(&format!("「{name}」{}", self.tr("进程已终止", "terminated")), false);
         }
     }
 

@@ -1,7 +1,9 @@
 [package]
 name = "proton-launch"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
+authors = ["liangzhaoyuan12"]
+license = "MIT"
 
 [dependencies]
 eframe = "0.31"
