@@ -42,6 +42,7 @@ Exec=$PKG_NAME
 Icon=$PKG_NAME
 Terminal=false
 Type=Application
+StartupWMClass=com.protonlaunch.Manager
 Categories=Game;Utility;
 EOF
 
@@ -67,7 +68,7 @@ Description: Proton game launcher GUI based on umu-run
  A graphical Proton launch manager using umu-run,
  with environment variable configuration similar to Lutris.
 Homepage: https://github.com/liangzhaoyuan12/proton-launch
-Depends: python3, libc6
+Depends: python3, libgtk-4-1 (>= 4.14), libadwaita-1-0 (>= 1.4)
 Recommends: umu-run | python3-umu-run
 EOF
 
@@ -96,7 +97,9 @@ Summary: Proton game launcher GUI based on umu-run
 License: MIT
 URL: https://github.com/liangzhaoyuan12/proton-launch
 BuildArch: $RPM_ARCH
-Requires: python3, glibc
+Requires: python3
+Requires: gtk4
+Requires: libadwaita
 Recommends: umu-run
 
 %description
@@ -154,7 +157,8 @@ size = $(stat -c%s "$BINARY")
 arch = $RPM_ARCH
 license = MIT
 depend = python3
-depend = glibc
+depend = gtk4
+depend = libadwaita
 makepkgopt = !mtree
 EOF
 
@@ -186,37 +190,45 @@ with environment variable configuration similar to Lutris.
 ## Dependencies (required)
 
 - **python3** — required to run umu-run
-- **libc** (glibc) — standard C library
+- **GTK 4** runtime libraries
+- **libadwaita** runtime libraries
 
 ## Runtime Recommends
 
 - \`umu-run\` — will be auto-extracted from the binary if not installed
-
-## Linux Distro Specific Dependencies
-
-### Debian / Ubuntu
-\`\`\`
-sudo apt-get install -y python3 libclang-dev libgtk-3-dev libxcb-render0-dev \\
-    libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev
-\`\`\`
-
-### Fedora / RHEL
-\`\`\`
-sudo dnf install python3 clang clang-devel clang-tools-extra libxkbcommon-devel \\
-    pkg-config openssl-devel libxcb-devel gtk3-devel atk fontconfig-devel
-\`\`\`
-
-### Arch Linux
-\`\`\`
-sudo pacman -S python clang gtk3 libxcb libxkbcommon openssl pkg-config
-\`\`\`
 
 ## Usage
 \`\`\`
 ./$PKG_NAME
 \`\`\`
 
+1. Click 「＋」 to create a new game
+2. Select the executable and configure arguments
+3. Set environment variables as needed
+4. Click 「保存配置」 to persist (Ctrl+S)
+5. Click 「运行」 to launch, 「停止」 to terminate
+6. Click 「日志」 to view runtime logs, with copy-to-clipboard support
+
 ## Build from Source
+
+Runtime/UI toolkit: GTK 4 + libadwaita（界面为 GNOME 原生控件，字体使用系统字体）.
+
+### Debian / Ubuntu
+\`\`\`
+sudo apt-get install -y python3 build-essential pkg-config libgtk-4-dev libadwaita-1-dev
+\`\`\`
+
+### Fedora / RHEL
+\`\`\`
+sudo dnf install python3 gtk4-devel libadwaita-devel pkg-config
+\`\`\`
+
+### Arch Linux
+\`\`\`
+sudo pacman -S python gtk4 libadwaita pkgconf
+\`\`\`
+
+Then:
 \`\`\`
 git clone https://github.com/liangzhaoyuan12/proton-launch.git
 cd proton-launch

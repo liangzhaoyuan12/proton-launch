@@ -1,8 +1,10 @@
 # Proton Launch Manager
 
-A graphical Proton launch GUI manager using `umu-run`, inspired by Lutris's Wine configuration interface. Built with Rust + egui/eframe.
+A graphical Proton launch GUI manager using `umu-run`, inspired by Lutris's Wine configuration interface. Built with Rust + GTK4 / libadwaita (native GNOME interface, Chinese UI).
 
 This project aims to create a high-performance, high-stability Proton game manager — Lutris tends to crash frequently, and this project seeks to provide a lightweight, reliable alternative built on **umu-run**.
+
+> **中文版本**: [README.zh-CN.md](README.zh-CN.md)
 
 ## Features
 
@@ -16,22 +18,25 @@ This project aims to create a high-performance, high-stability Proton game manag
 - **Modder/Injector** — Inject external tools via `PROTON_REMOTE_DEBUG_CMD`
 - **Renderer Selection** — One-click `-dx11` / `-dx12` / `-opengl` / `-vulkan` launch args
 - **Multi-process Management** — Each game starts independently with its own PID and stop button
-- **Bilingual UI** — Switch between Chinese and English instantly; language preference is remembered
+- **Unsaved Changes Protection** — Edits are cached in memory; switching items preserves your work. Close confirmation dialog warns before discarding unsaved changes
+- **Per-game Runtime Logs** — stdout/stderr captured in real-time, viewable via the 日志 button with copy-to-clipboard support. Logs are in-memory only and cleared on app restart
+- **Native GNOME UI** — GTK4 + libadwaita widgets, follows the system light/dark theme, collapses to stack navigation on narrow windows
 - **Persistent Config** — JSON format, saved to `~/.config/proton-launch/games.json`
 
 ## Dependencies
 
 **Runtime:**
 - Python 3 (required by umu-run)
-- glibc
+- GTK 4 runtime libraries
+- libadwaita runtime libraries
 
-**Build-time:**
+**Build-time (GTK4 + libadwaita):**
 
 | Distro | Command |
 |--------|---------|
-| Debian / Ubuntu | `sudo apt-get install -y python3 libclang-dev libgtk-3-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev` |
-| Fedora / RHEL | `sudo dnf install python3 clang clang-devel clang-tools-extra libxkbcommon-devel pkg-config openssl-devel libxcb-devel gtk3-devel atk fontconfig-devel` |
-| Arch Linux | `sudo pacman -S python clang gtk3 libxcb libxkbcommon openssl pkg-config` |
+| Debian / Ubuntu | `sudo apt-get install -y python3 build-essential pkg-config libgtk-4-dev libadwaita-1-dev` |
+| Fedora / RHEL | `sudo dnf install python3 gtk4-devel libadwaita-devel pkg-config` |
+| Arch Linux | `sudo pacman -S python gtk4 libadwaita pkgconf` |
 
 ## Build
 
@@ -56,10 +61,10 @@ Output is placed in the `build/` directory:
 
 ```
 build/
-├── proton-launch_0.1.0_amd64.deb
-├── proton-launch_0.1.0_x86_64.rpm
-├── proton-launch_0.1.0_x86_64.pkg.tar.zst
-└── proton-launch_0.1.0_amd64.tar.gz
+├── proton-launch_*.*.*_amd64.deb
+├── proton-launch_*.*.*_x86_64.rpm
+├── proton-launch_*.*.*_x86_64.pkg.tar.zst
+└── proton-launch_*.*.*_amd64.tar.gz
 ```
 
 ## Install Pre-built Packages
@@ -94,11 +99,12 @@ cd proton-launch-*-linux-*
 
 ## Usage
 
-1. Click 「＋ Add」 on the left to create a new game
+1. Click the 「＋」 button in the sidebar to create a new game
 2. Select the executable and configure arguments
-3. Set environment variables as needed (check the box and fill in the value)
-4. Click 「💾 Save Config」 to persist
-5. Click 「▶ Run」 to launch the game
+3. Set environment variables as needed (turn the switch on and fill in the value)
+4. Click 「保存配置」 to persist (`Ctrl+S`)
+5. Click 「运行」 to launch the game, 「停止」 to terminate its process
+6. Click 「日志」 to view real-time runtime logs (stdout/stderr), with a 「复制」 button to copy to clipboard
 
 ## Repositories
 
