@@ -304,74 +304,99 @@ fn env_group(
         .build();
 
     for category in ENV_CATEGORIES {
-        let set_count = category
-            .vars
-            .iter()
-            .filter(|v| game.env_vars.contains_key(v.key))
-            .count();
+        let total = category.vars.len();
 
-        let expander = adw::ExpanderRow::builder()
-            .title(category.name)
-            .subtitle(format!("已设置 {set_count}/{}", category.vars.len()))
-            .build();
-        expander.set_expanded(set_count > 0);
+        let expander = adw::ExpanderRow::builder().title(category.name).build();
+
+        // 本分类构建出的行 + 每行「当前是否启用」的判定器（用于刷新计数副标题）。
+        let mut built: Vec<(&'static str, EnvRow, Rc<dyn Fn() -> bool>)> = Vec::new();
 
         for def in category.vars {
-            let row = match game.env_vars.get(def.key) {
-                Some(value) if catalog::is_enabled(def.key, value) => {
-                    if catalog::is_bool_toggle(def.key) {
-                        let row = widgets::bool_env_row(def.label, def.key, true);
-                        row.connect_active_notify(changed_cb::<adw::SwitchRow>(handlers));
-                        expander.add_row(&row);
-                        EnvRow::Bool(row)
+            let key = def.key;
+            let (row, checker): (EnvRow, Rc<dyn Fn() -> bool>) = match game.env_vars.get(key) {
+                Some(value) if catalog::is_enabled(key, value) => {
+                    if catalog::is_bool_toggle(key) {
+                        let r = widgets::bool_env_row(def.label, key, true);
+                        let c = r.clone();
+                        (EnvRow::Bool(r), Rc::new(move || c.is_active()))
                     } else {
-                        let browse = browse_hint(def.key);
-                        let (row, entry) = widgets::text_env_row(
+                        let browse = browse_hint(key);
+                        let (r, entry) = widgets::text_env_row(
                             def.label,
-                            def.key,
+                            key,
                             value,
                             browse,
                             handlers.changed.clone(),
                         );
-                        row.connect_enable_expansion_notify(
-                            changed_cb::<adw::ExpanderRow>(handlers),
-                        );
-                        entry.connect_changed(changed_cb::<adw::EntryRow>(handlers));
-                        expander.add_row(&row);
-                        EnvRow::Text {
-                            expander: row,
-                            entry,
-                        }
+                        let c = r.clone();
+                        (EnvRow::Text { expander: r, entry }, Rc::new(move || c.enables_expansion()))
                     }
                 }
                 _ => {
-                    if catalog::is_bool_toggle(def.key) {
-                        let row = widgets::bool_env_row(def.label, def.key, false);
-                        row.connect_active_notify(changed_cb::<adw::SwitchRow>(handlers));
-                        expander.add_row(&row);
-                        EnvRow::Bool(row)
+                    if catalog::is_bool_toggle(key) {
+                        let r = widgets::bool_env_row(def.label, key, false);
+                        let c = r.clone();
+                        (EnvRow::Bool(r), Rc::new(move || c.is_active()))
                     } else {
-                        let browse = browse_hint(def.key);
-                        let (row, entry) = widgets::text_env_row(
+                        let browse = browse_hint(key);
+                        let (r, entry) = widgets::text_env_row(
                             def.label,
-                            def.key,
+                            key,
                             "",
                             browse,
                             handlers.changed.clone(),
                         );
-                        row.connect_enable_expansion_notify(
-                            changed_cb::<adw::ExpanderRow>(handlers),
-                        );
-                        entry.connect_changed(changed_cb::<adw::EntryRow>(handlers));
-                        expander.add_row(&row);
-                        EnvRow::Text {
-                            expander: row,
-                            entry,
-                        }
+                        let c = r.clone();
+                        (EnvRow::Text { expander: r, entry }, Rc::new(move || c.enables_expansion()))
                     }
                 }
             };
-            page.env_rows.push((def.key, row));
+            // 行挂进分类折叠行
+            match &row {
+                EnvRow::Bool(s) => expander.add_row(s),
+                EnvRow::Text { expander: ex, .. } => expander.add_row(ex),
+            }
+            built.push((key, row, checker));
+        }
+
+        // 本分类各行的「是否启用」判定器集合，供刷新计数。
+        let checkers: Vec<Rc<dyn Fn() -> bool>> =
+            built.iter().map(|(_, _, c)| c.clone()).collect();
+        let set_count = checkers.iter().filter(|f| f()).count();
+        expander.set_subtitle(&format!("已设置 {set_count}/{total}"));
+        expander.set_expanded(set_count > 0);
+
+        // 切换任意开关时刷新「已设置 X/N」副标题，同时同步内存。
+        let refresh: Rc<dyn Fn()> = Rc::new({
+            let expander = expander.clone();
+            move || {
+                let n = checkers.iter().filter(|f| f()).count();
+                expander.set_subtitle(&format!("已设置 {n}/{total}"));
+            }
+        });
+
+        for (key, row, _) in built {
+            match &row {
+                EnvRow::Bool(switch) => {
+                    let refresh = refresh.clone();
+                    let cb = handlers.changed.clone();
+                    switch.connect_active_notify(move |_| {
+                        refresh();
+                        cb();
+                    });
+                }
+                EnvRow::Text { expander: ex, entry } => {
+                    let refresh = refresh.clone();
+                    let cb = handlers.changed.clone();
+                    ex.connect_enable_expansion_notify(move |_| {
+                        refresh();
+                        cb();
+                    });
+                    let cb = handlers.changed.clone();
+                    entry.connect_changed(move |_| cb());
+                }
+            }
+            page.env_rows.push((key, row));
         }
 
         group.add(&expander);
