@@ -60,6 +60,404 @@ pub struct CustomRow {
     value_entry: adw::EntryRow,
 }
 
+/// MangoHud 单个监控项定义。
+struct MangoHudItemDef {
+    key: &'static str,
+    label: &'static str,
+}
+
+/// MangoHud 监控项分组（对应界面上的一个可折叠分类）。
+struct MangoHudCategory {
+    name: &'static str,
+    items: &'static [MangoHudItemDef],
+}
+
+/// MangoHud 全部可监控指标，按分类排列。
+const MANGO_HUD_CATEGORIES: &[MangoHudCategory] = &[
+    MangoHudCategory {
+        name: "帧率",
+        items: &[
+            MangoHudItemDef {
+                key: "fps",
+                label: "帧率 (FPS)",
+            },
+            MangoHudItemDef {
+                key: "frametime",
+                label: "帧时间",
+            },
+            MangoHudItemDef {
+                key: "frame_timing",
+                label: "帧时间图",
+            },
+            MangoHudItemDef {
+                key: "frame_timing_detailed",
+                label: "帧时间详细图",
+            },
+            MangoHudItemDef {
+                key: "dynamic_frame_timing",
+                label: "动态帧时间图",
+            },
+            MangoHudItemDef {
+                key: "frame_count",
+                label: "帧计数",
+            },
+            MangoHudItemDef {
+                key: "histogram",
+                label: "帧率直方图",
+            },
+            MangoHudItemDef {
+                key: "fps_color_change",
+                label: "帧率颜色变化",
+            },
+            MangoHudItemDef {
+                key: "fps_value",
+                label: "帧率阈值着色",
+            },
+            MangoHudItemDef {
+                key: "fps_color",
+                label: "帧率自定义颜色",
+            },
+            MangoHudItemDef {
+                key: "fps_sampling_period",
+                label: "帧率采样周期",
+            },
+            MangoHudItemDef {
+                key: "fps_only",
+                label: "仅显示帧率",
+            },
+            MangoHudItemDef {
+                key: "show_fps_limit",
+                label: "显示帧率上限",
+            },
+        ],
+    },
+    MangoHudCategory {
+        name: "GPU",
+        items: &[
+            MangoHudItemDef {
+                key: "gpu_stats",
+                label: "GPU 使用率",
+            },
+            MangoHudItemDef {
+                key: "gpu_temp",
+                label: "GPU 温度",
+            },
+            MangoHudItemDef {
+                key: "gpu_junction_temp",
+                label: "GPU 结温",
+            },
+            MangoHudItemDef {
+                key: "gpu_core_clock",
+                label: "GPU 核心频率",
+            },
+            MangoHudItemDef {
+                key: "gpu_mem_clock",
+                label: "GPU 显存频率",
+            },
+            MangoHudItemDef {
+                key: "gpu_mem_temp",
+                label: "GPU 显存温度",
+            },
+            MangoHudItemDef {
+                key: "gpu_power",
+                label: "GPU 功耗",
+            },
+            MangoHudItemDef {
+                key: "gpu_power_limit",
+                label: "GPU 功耗限制",
+            },
+            MangoHudItemDef {
+                key: "gpu_name",
+                label: "GPU 型号",
+            },
+            MangoHudItemDef {
+                key: "gpu_fan",
+                label: "GPU 风扇转速",
+            },
+            MangoHudItemDef {
+                key: "gpu_voltage",
+                label: "GPU 电压 (仅 AMD)",
+            },
+            MangoHudItemDef {
+                key: "gpu_load_change",
+                label: "GPU 负载颜色变化",
+            },
+            MangoHudItemDef {
+                key: "gpu_load_value",
+                label: "GPU 负载阈值着色",
+            },
+            MangoHudItemDef {
+                key: "gpu_load_color",
+                label: "GPU 负载自定义颜色",
+            },
+            MangoHudItemDef {
+                key: "gpu_efficiency",
+                label: "GPU 能效",
+            },
+        ],
+    },
+    MangoHudCategory {
+        name: "CPU",
+        items: &[
+            MangoHudItemDef {
+                key: "cpu_stats",
+                label: "CPU 使用率",
+            },
+            MangoHudItemDef {
+                key: "cpu_temp",
+                label: "CPU 温度",
+            },
+            MangoHudItemDef {
+                key: "cpu_power",
+                label: "CPU 功耗",
+            },
+            MangoHudItemDef {
+                key: "cpu_mhz",
+                label: "CPU 频率",
+            },
+            MangoHudItemDef {
+                key: "cpu_load_change",
+                label: "CPU 负载颜色变化",
+            },
+            MangoHudItemDef {
+                key: "cpu_load_value",
+                label: "CPU 负载阈值着色",
+            },
+            MangoHudItemDef {
+                key: "cpu_load_color",
+                label: "CPU 负载自定义颜色",
+            },
+            MangoHudItemDef {
+                key: "cpu_efficiency",
+                label: "CPU 能效",
+            },
+            MangoHudItemDef {
+                key: "core_load",
+                label: "各核心负载",
+            },
+            MangoHudItemDef {
+                key: "core_load_change",
+                label: "核心负载颜色变化",
+            },
+            MangoHudItemDef {
+                key: "core_bars",
+                label: "核心负载条形图",
+            },
+            MangoHudItemDef {
+                key: "core_type",
+                label: "核心类型 (P/E)",
+            },
+        ],
+    },
+    MangoHudCategory {
+        name: "内存",
+        items: &[
+            MangoHudItemDef {
+                key: "ram",
+                label: "内存 (RAM)",
+            },
+            MangoHudItemDef {
+                key: "vram",
+                label: "显存 (VRAM)",
+            },
+            MangoHudItemDef {
+                key: "swap",
+                label: "交换空间 (Swap)",
+            },
+            MangoHudItemDef {
+                key: "procmem",
+                label: "进程内存",
+            },
+            MangoHudItemDef {
+                key: "procmem_shared",
+                label: "进程共享内存",
+            },
+            MangoHudItemDef {
+                key: "procmem_virt",
+                label: "进程虚拟内存",
+            },
+            MangoHudItemDef {
+                key: "proc_vram",
+                label: "进程显存",
+            },
+        ],
+    },
+    MangoHudCategory {
+        name: "电池",
+        items: &[
+            MangoHudItemDef {
+                key: "battery",
+                label: "电池电量",
+            },
+            MangoHudItemDef {
+                key: "battery_icon",
+                label: "电池图标",
+            },
+            MangoHudItemDef {
+                key: "battery_watt",
+                label: "电池功耗",
+            },
+            MangoHudItemDef {
+                key: "battery_time",
+                label: "电池剩余时间",
+            },
+            MangoHudItemDef {
+                key: "device_battery",
+                label: "外设电池 (手柄/鼠标)",
+            },
+            MangoHudItemDef {
+                key: "device_battery_icon",
+                label: "外设电池图标",
+            },
+        ],
+    },
+    MangoHudCategory {
+        name: "网络与 I/O",
+        items: &[
+            MangoHudItemDef {
+                key: "network",
+                label: "网络吞吐量",
+            },
+            MangoHudItemDef {
+                key: "io_read",
+                label: "磁盘读取",
+            },
+            MangoHudItemDef {
+                key: "io_write",
+                label: "磁盘写入",
+            },
+        ],
+    },
+    MangoHudCategory {
+        name: "系统信息",
+        items: &[
+            MangoHudItemDef {
+                key: "engine_version",
+                label: "引擎版本",
+            },
+            MangoHudItemDef {
+                key: "engine_short_names",
+                label: "引擎简称",
+            },
+            MangoHudItemDef {
+                key: "vulkan_driver",
+                label: "Vulkan 驱动版本",
+            },
+            MangoHudItemDef {
+                key: "wine",
+                label: "Wine 版本",
+            },
+            MangoHudItemDef {
+                key: "winesync",
+                label: "Wine 同步状态",
+            },
+            MangoHudItemDef {
+                key: "exec_name",
+                label: "可执行文件名",
+            },
+            MangoHudItemDef {
+                key: "arch",
+                label: "系统架构 (32/64位)",
+            },
+            MangoHudItemDef {
+                key: "resolution",
+                label: "当前分辨率",
+            },
+            MangoHudItemDef {
+                key: "display_server",
+                label: "显示服务器 (X11/Wayland)",
+            },
+            MangoHudItemDef {
+                key: "present_mode",
+                label: "Vulkan 呈现模式",
+            },
+            MangoHudItemDef {
+                key: "time",
+                label: "当前时间",
+            },
+            MangoHudItemDef {
+                key: "version",
+                label: "MangoHud 版本",
+            },
+        ],
+    },
+    MangoHudCategory {
+        name: "节能与状态",
+        items: &[
+            MangoHudItemDef {
+                key: "gamemode",
+                label: "GameMode 状态",
+            },
+            MangoHudItemDef {
+                key: "vkbasalt",
+                label: "vkBasalt 状态",
+            },
+            MangoHudItemDef {
+                key: "fsr",
+                label: "FSR 状态 (Gamescope)",
+            },
+            MangoHudItemDef {
+                key: "hdr",
+                label: "HDR 状态 (Gamescope)",
+            },
+            MangoHudItemDef {
+                key: "refresh_rate",
+                label: "刷新率 (Gamescope)",
+            },
+            MangoHudItemDef {
+                key: "throttling_status",
+                label: "GPU 降频状态",
+            },
+            MangoHudItemDef {
+                key: "throttling_status_graph",
+                label: "降频状态帧时间图",
+            },
+            MangoHudItemDef {
+                key: "flip_efficiency",
+                label: "翻页效率",
+            },
+            MangoHudItemDef {
+                key: "temp_fahrenheit",
+                label: "温度使用华氏度",
+            },
+        ],
+    },
+    MangoHudCategory {
+        name: "媒体与自定义",
+        items: &[
+            MangoHudItemDef {
+                key: "media_player",
+                label: "媒体播放器信息",
+            },
+            MangoHudItemDef {
+                key: "custom_text",
+                label: "自定义文本",
+            },
+            MangoHudItemDef {
+                key: "custom_text_center",
+                label: "自定义居中文本",
+            },
+        ],
+    },
+    MangoHudCategory {
+        name: "布局",
+        items: &[
+            MangoHudItemDef {
+                key: "horizontal",
+                label: "水平布局",
+            },
+            MangoHudItemDef {
+                key: "hud_compact",
+                label: "紧凑模式",
+            },
+            MangoHudItemDef {
+                key: "hud_no_margin",
+                label: "无边距",
+            },
+        ],
+    },
+];
+
 pub struct ConfigPage {
     pub root: gtk::Widget,
     handlers: ConfigHandlers,
@@ -78,6 +476,9 @@ pub struct ConfigPage {
     running_badge: gtk::Label,
     pid_label: gtk::Label,
     stop_button: gtk::Button,
+    // MangoHud 性能监控
+    mango_hud_switch: adw::SwitchRow,
+    mango_hud_items: Vec<(&'static str, adw::SwitchRow)>,
 }
 
 /// 「控件变化 → 同步」回调，各控件 connect_* 通用。
@@ -111,11 +512,14 @@ pub fn build(game: &GameConfig, handlers: &ConfigHandlers, running_pid: Option<i
         running_badge: gtk::Label::new(Some("运行中")),
         pid_label: gtk::Label::new(None),
         stop_button: gtk::Button::with_label("停止"),
+        mango_hud_switch: adw::SwitchRow::new(),
+        mango_hud_items: Vec::new(),
     };
 
     prefs.add(&basic_group(game, &handlers, &page));
     prefs.add(&env_group(game, &handlers, &mut page));
     prefs.add(&custom_group(game, &handlers, &mut page));
+    prefs.add(&mango_hud_group(game, &handlers, &mut page));
 
     // 顶部操作栏 + 可滚动的偏好设置页
     let scrolled = gtk::ScrolledWindow::builder()
@@ -575,6 +979,91 @@ fn display_key(key: &str) -> &str {
     }
 }
 
+// ─── MangoHud 性能监控 ────────────────────────────────────────────────────
+
+fn mango_hud_group(
+    game: &GameConfig,
+    handlers: &ConfigHandlers,
+    page: &mut ConfigPage,
+) -> adw::PreferencesGroup {
+    let group = adw::PreferencesGroup::builder()
+        .title("性能监控 (MangoHud)")
+        .description("在游戏运行时显示系统性能信息 overlay（需要系统安装 mangohud）")
+        .build();
+
+    // 启用开关
+    page.mango_hud_switch.set_title("启用性能监控");
+    page.mango_hud_switch
+        .set_subtitle("游戏启动时显示 MangoHud overlay");
+    page.mango_hud_switch.set_active(game.enable_mango_hud);
+    page.mango_hud_switch
+        .connect_active_notify(changed_cb::<adw::SwitchRow>(handlers));
+    group.add(&page.mango_hud_switch);
+
+    // 解析已有配置，构建勾选状态
+    let enabled_set: std::collections::HashSet<&str> = game
+        .mango_hud_config
+        .split(',')
+        .filter(|s| !s.trim().is_empty())
+        .collect();
+
+    // 按分类创建折叠行
+    for category in MANGO_HUD_CATEGORIES {
+        let total = category.items.len();
+        let expander = adw::ExpanderRow::builder().title(category.name).build();
+
+        // 收集本分类的勾选判定器
+        let mut checkers: Vec<Rc<dyn Fn() -> bool>> = Vec::new();
+
+        for item_def in category.items {
+            let row = adw::SwitchRow::builder()
+                .title(item_def.label)
+                .subtitle(item_def.key)
+                .active(enabled_set.contains(item_def.key))
+                .build();
+            let weak = glib::WeakRef::new();
+            weak.set(Some(&row));
+            checkers.push(Rc::new(move || {
+                weak.upgrade().is_some_and(|w| w.is_active())
+            }));
+            let cb = handlers.changed.clone();
+            row.connect_active_notify(move |_| cb());
+            page.mango_hud_items.push((item_def.key, row.clone()));
+            expander.add_row(&row);
+        }
+
+        // 副标题计数
+        let set_count = checkers.iter().filter(|f| f()).count();
+        expander.set_subtitle(&format!("已选择 {set_count}/{total}"));
+        expander.set_expanded(set_count > 0);
+
+        // 切换时刷新副标题
+        let refresh: Rc<dyn Fn()> = Rc::new({
+            let weak_exp = glib::WeakRef::new();
+            weak_exp.set(Some(&expander));
+            let checkers = checkers.clone();
+            move || {
+                if let Some(exp) = weak_exp.upgrade() {
+                    let n = checkers.iter().filter(|f| f()).count();
+                    exp.set_subtitle(&format!("已选择 {n}/{total}"));
+                }
+            }
+        });
+
+        // 给本分类每个 SwitchRow 挂副标题刷新
+        let start = page.mango_hud_items.len() - category.items.len();
+        for i in start..page.mango_hud_items.len() {
+            let refresh = refresh.clone();
+            let (_, ref sw) = page.mango_hud_items[i];
+            sw.connect_active_notify(move |_| refresh());
+        }
+
+        group.add(&expander);
+    }
+
+    group
+}
+
 // ─── 取值 / 状态刷新 ─────────────────────────────────────────────────────
 
 impl ConfigPage {
@@ -651,6 +1140,16 @@ impl ConfigPage {
             game.env_vars
                 .insert(key.to_string(), row.value_entry.text().to_string());
         }
+
+        // MangoHud 性能监控
+        game.enable_mango_hud = self.mango_hud_switch.is_active();
+        game.mango_hud_config = self
+            .mango_hud_items
+            .iter()
+            .filter(|(_, check)| check.is_active())
+            .map(|(key, _)| *key)
+            .collect::<Vec<_>>()
+            .join(",");
     }
 
     /// 刷新「运行中」相关控件的显示。

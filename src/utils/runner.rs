@@ -156,6 +156,21 @@ impl Runner {
             cmd.env(k, v);
         }
 
+        // MangoHud 性能监控
+        if config.enable_mango_hud {
+            cmd.env("MANGOHUD", "1");
+            cmd.env("MANGOHUD_DLSYM", "1");
+            // 先禁用所有默认显示项，再按用户选择启用
+            let mut mango_config = String::from(
+                "gpu_stats=0,cpu_stats=0,ram=0,vram=0,swap=0,fps=0,frame_timing=0,frametime=0",
+            );
+            if !config.mango_hud_config.trim().is_empty() {
+                mango_config.push(',');
+                mango_config.push_str(&config.mango_hud_config);
+            }
+            cmd.env("MANGOHUD_CONFIG", &mango_config);
+        }
+
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
         // 独立进程组，便于整棵进程树一起终止

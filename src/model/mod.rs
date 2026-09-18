@@ -42,6 +42,12 @@ pub struct GameConfig {
     /// 传给游戏的环境变量
     #[serde(default)]
     pub env_vars: HashMap<String, String>,
+    /// 是否启用 MangoHud 性能监控 overlay
+    #[serde(default)]
+    pub enable_mango_hud: bool,
+    /// MangoHud 配置项（逗号分隔，如 "fps,cpu,gpu,ram"）
+    #[serde(default)]
+    pub mango_hud_config: String,
 }
 
 /// 实现 Default 以兼容 serde 的 `#[serde(default)]`。
@@ -55,6 +61,8 @@ impl Default for GameConfig {
             work_dir: String::new(),
             renderer: String::new(),
             env_vars: HashMap::new(),
+            enable_mango_hud: false,
+            mango_hud_config: String::new(),
         }
     }
 }

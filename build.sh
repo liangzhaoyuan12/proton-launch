@@ -68,7 +68,7 @@ Description: Proton game launcher GUI based on umu-run
  A graphical Proton launch manager using umu-run,
  with environment variable configuration similar to Lutris.
 Homepage: https://github.com/liangzhaoyuan12/proton-launch
-Depends: python3, libgtk-4-1 (>= 4.18), libadwaita-1-0 (>= 1.4)
+Depends: python3, libgtk-4-1 (>= 4.18), libadwaita-1-0 (>= 1.4), mangohud
 Recommends: umu-run | python3-umu-run
 EOF
 
@@ -100,6 +100,7 @@ BuildArch: $RPM_ARCH
 Requires: python3
 Requires: gtk4
 Requires: libadwaita
+Requires: mangohud
 Recommends: umu-run
 
 %description
@@ -159,6 +160,7 @@ license = MIT
 depend = python3
 depend = gtk4
 depend = libadwaita
+depend = mangohud
 makepkgopt = !mtree
 EOF
 
@@ -192,10 +194,11 @@ with environment variable configuration similar to Lutris.
 - **python3** — required to run umu-run
 - **GTK 4** runtime libraries
 - **libadwaita** runtime libraries
+- **mangohud** — 游戏性能监控 overlay
 
 ## Runtime Recommends
 
-- \`umu-run\` — will be auto-extracted from the binary if not installed
+- \umu-run\ — will be auto-extracted from the binary if not installed
 
 ## Usage
 \`\`\`
@@ -215,17 +218,17 @@ Runtime/UI toolkit: GTK 4 + libadwaita（界面为 GNOME 原生控件，字体�
 
 ### Debian / Ubuntu
 \`\`\`
-sudo apt-get install -y python3 build-essential pkg-config libgtk-4-dev libadwaita-1-dev
+sudo apt-get install -y python3 build-essential pkg-config libgtk-4-dev libadwaita-1-dev mangohud
 \`\`\`
 
 ### Fedora / RHEL
 \`\`\`
-sudo dnf install python3 gtk4-devel libadwaita-devel pkg-config
+sudo dnf install python3 gtk4-devel libadwaita-devel pkg-config mangohud
 \`\`\`
 
 ### Arch Linux
 \`\`\`
-sudo pacman -S python gtk4 libadwaita pkgconf
+sudo pacman -S python gtk4 libadwaita pkgconf mangohud
 \`\`\`
 
 Then:
