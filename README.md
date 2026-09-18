@@ -12,7 +12,9 @@ This project aims to create a high-performance, high-stability Proton game manag
 - **Side-loaded umu-run** — The `umu-run` binary is embedded at compile time, no manual installation needed
 - **Proton Configuration** — Select Proton version/path with a browse dialog
 - **Categorized Environment Variables** — 15 categories covering all common Proton/Wine env vars
-  - Core, DLL, Graphics, Wayland, Sync, Memory/CPU, Audio, Vulkan, Mesa/OpenGL, NVIDIA, DLSS/FSR/XeSS, Performance, Input, Font, Other
+  - Core, DLL, Graphics, Wayland, Sync, Memory/CPU, Audio, Vulkan, Mesa/OpenGL, NVIDIA, DLSS/FSR/XeSS, Input, Font, Other
+- **MangoHud Performance Overlay** — Show CPU/GPU usage, temperature, FPS, memory and more during gameplay
+  - 90+ monitoring metrics organized in collapsible categories (FPS, GPU, CPU, Memory, Battery, Network, System Info, Power Status, etc.)
 - **One-click Toggle** — All 0/1 boolean variables render as checkboxes
 - **Custom Env Vars** — Add arbitrary key-value pairs
 - **Modder/Injector** — Inject external tools via `PROTON_REMOTE_DEBUG_CMD`
@@ -29,14 +31,15 @@ This project aims to create a high-performance, high-stability Proton game manag
 - Python 3 (required by umu-run)
 - GTK 4 runtime libraries
 - libadwaita runtime libraries
+- mangohud (performance overlay)
 
 **Build-time (GTK4 + libadwaita):**
 
 | Distro | Command |
 |--------|---------|
-| Debian / Ubuntu | `sudo apt-get install -y python3 build-essential pkg-config libgtk-4-dev libadwaita-1-dev` |
-| Fedora / RHEL | `sudo dnf install python3 gtk4-devel libadwaita-devel pkg-config` |
-| Arch Linux | `sudo pacman -S python gtk4 libadwaita pkgconf` |
+| Debian / Ubuntu | `sudo apt-get install -y python3 build-essential pkg-config libgtk-4-dev libadwaita-1-dev mangohud` |
+| Fedora / RHEL | `sudo dnf install python3 gtk4-devel libadwaita-devel pkg-config mangohud` |
+| Arch Linux | `sudo pacman -S python gtk4 libadwaita pkgconf mangohud` |
 
 ## Build
 
@@ -102,9 +105,10 @@ cd proton-launch-*-linux-*
 1. Click the 「＋」 button in the sidebar to create a new game
 2. Select the executable and configure arguments
 3. Set environment variables as needed (turn the switch on and fill in the value)
-4. Click 「保存配置」 to persist (`Ctrl+S`)
-5. Click 「运行」 to launch the game, 「停止」 to terminate its process
-6. Click 「日志」 to view real-time runtime logs (stdout/stderr), with a 「复制」 button to copy to clipboard
+4. Enable MangoHud performance overlay in the 「性能监控」 section if desired
+5. Click 「保存配置」 to persist (`Ctrl+S`)
+6. Click 「运行」 to launch the game, 「停止」 to terminate its process
+7. Click 「日志」 to view real-time runtime logs (stdout/stderr), with a 「复制」 button to copy to clipboard
 
 ## Repositories
 

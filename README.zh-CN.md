@@ -12,7 +12,9 @@
 - **内嵌 umu-run** — 编译时嵌入 `umu-run` 二进制，无需手动安装
 - **Proton 配置** — 选择 Proton 版本/路径，支持浏览对话框
 - **分类环境变量** — 15 个分类，覆盖所有常用 Proton/Wine 环境变量
-  - 核心、DLL、图形渲染、Wayland、同步机制、内存/CPU、音频、Vulkan、Mesa/OpenGL、NVIDIA、DLSS/FSR/XeSS、性能监控、输入设备、字体、其他
+  - 核心、DLL、图形渲染、Wayland、同步机制、内存/CPU、音频、Vulkan、Mesa/OpenGL、NVIDIA、DLSS/FSR/XeSS、输入设备、字体、其他
+- **MangoHud 性能监控** — 游戏运行时显示 CPU/GPU 使用率、温度、帧率、内存等信息
+  - 90+ 个监控指标，按分类折叠选择（帧率、GPU、CPU、内存、电池、网络、系统信息、节能状态等）
 - **一键开关** — 所有 0/1 布尔变量渲染为复选框
 - **自定义环境变量** — 添加任意键值对
 - **修改器/注入器** — 通过 `PROTON_REMOTE_DEBUG_CMD` 注入外部工具
@@ -29,14 +31,15 @@
 - Python 3（umu-run 必需）
 - GTK 4 运行时库
 - libadwaita 运行时库
+- mangohud（性能监控叠加层）
 
 **编译时（GTK4 + libadwaita）：**
 
 | 发行版 | 命令 |
 |--------|------|
-| Debian / Ubuntu | `sudo apt-get install -y python3 build-essential pkg-config libgtk-4-dev libadwaita-1-dev` |
-| Fedora / RHEL | `sudo dnf install python3 gtk4-devel libadwaita-devel pkg-config` |
-| Arch Linux | `sudo pacman -S python gtk4 libadwaita pkgconf` |
+| Debian / Ubuntu | `sudo apt-get install -y python3 build-essential pkg-config libgtk-4-dev libadwaita-1-dev mangohud` |
+| Fedora / RHEL | `sudo dnf install python3 gtk4-devel libadwaita-devel pkg-config mangohud` |
+| Arch Linux | `sudo pacman -S python gtk4 libadwaita pkgconf mangohud` |
 
 ## 构建
 
@@ -102,9 +105,10 @@ cd proton-launch-*-linux-*
 1. 点击侧边栏「＋」按钮创建新游戏
 2. 选择可执行文件并配置参数
 3. 按需设置环境变量（打开开关并填写值）
-4. 点击「保存配置」持久化（`Ctrl+S`）
-5. 点击「运行」启动游戏，「停止」终止进程
-6. 点击「日志」查看运行时日志（stdout/stderr），支持「复制」到剪贴板
+4. 在「性能监控」区域启用 MangoHud 性能叠加层（可选）
+5. 点击「保存配置」持久化（`Ctrl+S`）
+6. 点击「运行」启动游戏，「停止」终止进程
+7. 点击「日志」查看运行时日志（stdout/stderr），支持「复制」到剪贴板
 
 ## 仓库
 
