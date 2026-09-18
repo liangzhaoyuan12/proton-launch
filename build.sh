@@ -68,7 +68,7 @@ Description: Proton game launcher GUI based on umu-run
  A graphical Proton launch manager using umu-run,
  with environment variable configuration similar to Lutris.
 Homepage: https://github.com/liangzhaoyuan12/proton-launch
-Depends: python3, libgtk-4-1 (>= 4.14), libadwaita-1-0 (>= 1.4)
+Depends: python3, libgtk-4-1 (>= 4.18), libadwaita-1-0 (>= 1.4)
 Recommends: umu-run | python3-umu-run
 EOF
 

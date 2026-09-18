@@ -10,8 +10,8 @@ use std::rc::{Rc, Weak};
 use std::thread;
 use std::time::Duration;
 
-use gtk::prelude::*;
 use adw::prelude::*;
+use gtk::glib;
 
 use crate::model::GameConfig;
 use crate::navigation;
@@ -61,11 +61,21 @@ pub fn launch(ui: Ui) {
 
 /// 在回调里拿到 `App`：借用失败（重入）时安静返回，不 panic。
 fn with_app<F: FnOnce(&mut App)>(weak: &Weak<RefCell<App>>, f: F) {
-    if let Some(app) = weak.upgrade() {
-        if let Ok(mut app) = app.try_borrow_mut() {
-            f(&mut app);
-        }
+    if let Some(app) = weak.upgrade()
+        && let Ok(mut app) = app.try_borrow_mut()
+    {
+        f(&mut app);
     }
+}
+
+/// 在回调里拿到 `App` 并返回一个值（用于需要返回值的场景，如保存成功判断）。
+fn with_app_save<R, F: FnOnce(&mut App) -> R>(weak: &Weak<RefCell<App>>, f: F) -> Option<R> {
+    if let Some(app) = weak.upgrade()
+        && let Ok(mut app) = app.try_borrow_mut()
+    {
+        return Some(f(&mut app));
+    }
+    None
 }
 
 pub struct App {
@@ -91,8 +101,9 @@ pub struct App {
 
 impl App {
     fn new(ui: Ui) -> Self {
-        App {
-            store: ConfigStore::new(),
+        let (store, load_error) = ConfigStore::new();
+        let app = App {
+            store,
             runner: Runner::new(),
             selected: None,
             running: HashMap::new(),
@@ -111,7 +122,21 @@ impl App {
             syncing: Rc::new(Cell::new(false)),
             dirty: Rc::new(Cell::new(false)),
             me: Weak::new(),
+        };
+        // P0-4: 配置加载失败时弹窗告知用户
+        if let Some(msg) = load_error {
+            let window = app.ui.window.clone();
+            let msg = msg.clone();
+            // 延迟到窗口呈现后再弹窗
+            let _ = glib::idle_add_local(move || {
+                let dialog =
+                    adw::MessageDialog::new(Some(&window), Some("配置文件损坏"), Some(&msg));
+                dialog.add_response("ok", "确定");
+                dialog.present();
+                glib::ControlFlow::Break
+            });
         }
+        app
     }
 
     // ─── 启动 ────────────────────────────────────────────────────────────
@@ -182,14 +207,8 @@ impl App {
                 dialog.add_response("cancel", "取消");
                 dialog.add_response("discard", "不保存");
                 dialog.add_response("save", "保存");
-                dialog.set_response_appearance(
-                    "save",
-                    adw::ResponseAppearance::Suggested,
-                );
-                dialog.set_response_appearance(
-                    "discard",
-                    adw::ResponseAppearance::Destructive,
-                );
+                dialog.set_response_appearance("save", adw::ResponseAppearance::Suggested);
+                dialog.set_response_appearance("discard", adw::ResponseAppearance::Destructive);
                 dialog.set_default_response(Some("save"));
                 dialog.set_close_response("cancel");
                 dialog.present();
@@ -198,10 +217,15 @@ impl App {
                 dialog.connect_response(None, move |_, response| {
                     match response {
                         "save" => {
-                            with_app(&me, |app| {
-                                app.save_current();
+                            let saved = with_app_save(&me, |app| {
+                                app.sync_current_game();
+                                app.store.save().is_ok()
                             });
-                            window.close();
+                            if saved == Some(true) {
+                                with_app(&me, |app| app.dirty.set(false));
+                                window.close();
+                            }
+                            // 保存失败时不关闭窗口
                         }
                         "discard" => {
                             with_app(&me, |app| {
@@ -258,9 +282,17 @@ impl App {
     fn install_shortcuts(&self) {
         let controller = gtk::ShortcutController::new();
         controller.set_scope(gtk::ShortcutScope::Global);
-        add_shortcut(&controller, "<Control>s", self.action(|app| app.save_current()));
+        add_shortcut(
+            &controller,
+            "<Control>s",
+            self.action(|app| app.save_current()),
+        );
         add_shortcut(&controller, "<Control>n", self.action(|app| app.add_game()));
-        add_shortcut(&controller, "<Control>r", self.action(|app| app.run_current()));
+        add_shortcut(
+            &controller,
+            "<Control>r",
+            self.action(|app| app.run_current()),
+        );
         self.ui.window.add_controller(controller);
     }
 
@@ -288,11 +320,17 @@ impl App {
         self.selected = Some(idx);
         self.rebuild_config_page();
         self.show_content_page();
-        let name = self.store.game(idx).map(|g| g.display_name(idx)).unwrap_or_default();
+        let name = self
+            .store
+            .game(idx)
+            .map(|g| g.display_name(idx))
+            .unwrap_or_default();
         self.set_status(&format!("已选择: {name}"), false);
     }
 
     fn add_game(&mut self) {
+        // P0-7: 添加前先同步当前编辑
+        self.sync_current_game();
         let name = format!("新游戏 #{}", self.store.len() + 1);
         let idx = self.store.add_game(GameConfig::new(&name));
         self.selected = Some(idx);
@@ -300,8 +338,9 @@ impl App {
         self.rebuild_config_page();
         self.show_content_page();
         self.set_status(&format!("已添加: {name}"), false);
-        if let Err(e) = self.store.save() {
-            self.report_error(&format!("保存失败: {e}"));
+        match self.store.save() {
+            Ok(()) => self.dirty.set(false),
+            Err(e) => self.report_error(&format!("保存失败: {e}")),
         }
     }
 
@@ -313,6 +352,8 @@ impl App {
         if self.store.game(idx).is_none() {
             return;
         }
+        // P0-7: 删除前先同步当前编辑
+        self.sync_current_game();
 
         // 运行中的进程一并终止
         if let Some(mut state) = self.running.remove(&idx) {
@@ -330,7 +371,11 @@ impl App {
         }
         self.running = remapped;
 
-        let name = self.store.game(idx).map(|g| g.display_name(idx)).unwrap_or_default();
+        let name = self
+            .store
+            .game(idx)
+            .map(|g| g.display_name(idx))
+            .unwrap_or_default();
         self.store.remove_game(idx);
         self.selected = if self.store.is_empty() {
             None
@@ -352,6 +397,8 @@ impl App {
 
         if let Err(e) = self.store.save() {
             self.report_error(&format!("保存失败: {e}"));
+        } else {
+            self.dirty.set(false);
         }
     }
 
@@ -430,8 +477,14 @@ impl App {
             self.report_error("请先选择可执行文件");
             return;
         }
-        if self.running.contains_key(&idx) {
+        // P1-20: done 状态的进程不算运行中
+        if self.running.get(&idx).is_some_and(|s| !s.done) {
             self.report_error("该游戏已在运行中");
+            return;
+        }
+        // P1-19: 运行前校验可执行文件是否存在
+        if !std::path::Path::new(game.executable.trim()).exists() {
+            self.report_error(&format!("可执行文件不存在: {}", game.executable.trim()));
             return;
         }
 
@@ -471,7 +524,8 @@ impl App {
                 }
 
                 let pid = child.id() as i32;
-                self.running.insert(idx, RunningState { child, done: false });
+                self.running
+                    .insert(idx, RunningState { child, done: false });
                 self.refresh_sidebar();
                 self.update_running_ui();
 
@@ -502,7 +556,11 @@ impl App {
 
         self.refresh_sidebar();
         self.update_running_ui();
-        let name = self.store.game(idx).map(|g| g.display_name(idx)).unwrap_or_default();
+        let name = self
+            .store
+            .game(idx)
+            .map(|g| g.display_name(idx))
+            .unwrap_or_default();
         self.set_status(&format!("「{name}」进程已终止"), false);
         self.toast(&format!("「{name}」已停止"), false);
     }

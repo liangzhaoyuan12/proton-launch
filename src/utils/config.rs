@@ -1,6 +1,7 @@
 //! 配置读写：`games.json` 的加载与保存。
 
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
 
 use directories::ProjectDirs;
@@ -10,12 +11,12 @@ use crate::model::GameConfig;
 
 #[derive(Serialize, Deserialize, Default)]
 struct ConfigFile {
+    #[serde(default)]
     games: Vec<GameConfig>,
 }
 
 fn project_dirs() -> ProjectDirs {
-    ProjectDirs::from("com", "proton-launch", "proton-launch")
-        .expect("无法确定配置目录")
+    ProjectDirs::from("com", "proton-launch", "proton-launch").expect("无法确定配置目录")
 }
 
 /// 游戏列表的内存副本 + 磁盘持久化。
@@ -25,19 +26,36 @@ pub struct ConfigStore {
 }
 
 impl ConfigStore {
-    pub fn new() -> Self {
+    pub fn new() -> (Self, Option<String>) {
         let path = project_dirs().config_dir().join("games.json");
+        let mut error_msg = None;
         let games = match fs::read_to_string(&path) {
             Ok(content) => match serde_json::from_str::<ConfigFile>(&content) {
                 Ok(cf) => cf.games,
                 Err(e) => {
-                    eprintln!("配置解析失败: {e}");
+                    // P0-4: 备份损坏文件并返回错误信息
+                    let timestamp = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    let backup = path.with_extension(format!("json.corrupt-{timestamp}"));
+                    let backup_msg = if let Err(be) = fs::copy(&path, &backup) {
+                        format!("（备份失败: {be}）")
+                    } else {
+                        format!(
+                            "已备份为 {}",
+                            backup.file_name().unwrap_or_default().to_string_lossy()
+                        )
+                    };
+                    let msg = format!("配置文件解析失败: {e}。{backup_msg}，当前以空配置启动。");
+                    eprintln!("{msg}");
+                    error_msg = Some(msg);
                     Vec::new()
                 }
             },
             Err(_) => Vec::new(),
         };
-        ConfigStore { path, games }
+        (ConfigStore { path, games }, error_msg)
     }
 
     pub fn games(&self) -> &[GameConfig] {
@@ -74,7 +92,7 @@ impl ConfigStore {
         }
     }
 
-    /// 写入磁盘。
+    /// 写入磁盘（原子写：临时文件 + fsync + rename）。
     pub fn save(&self) -> Result<(), String> {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -83,7 +101,18 @@ impl ConfigStore {
             games: self.games.clone(),
         })
         .map_err(|e| e.to_string())?;
-        fs::write(&self.path, json).map_err(|e| e.to_string())
+        let tmp = self.path.with_extension("json.tmp");
+        {
+            let mut f = fs::File::create(&tmp).map_err(|e| e.to_string())?;
+            f.write_all(json.as_bytes()).map_err(|e| e.to_string())?;
+            f.sync_all().map_err(|e| e.to_string())?;
+        }
+        fs::rename(&tmp, &self.path).map_err(|e| e.to_string())?;
+        // 对目录做 fsync，确保 rename 元数据落盘
+        if let Some(d) = self.path.parent() {
+            let _ = fs::File::open(d).and_then(|f| f.sync_all());
+        }
+        Ok(())
     }
 
     /// 应用数据目录（umu-run 落盘位置）。

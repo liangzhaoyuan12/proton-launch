@@ -3,7 +3,6 @@
 //! 这里只做「接线 + 展示」：行的增删一律通过 `gtk::ListBox` 的 append / remove_all，
 //! 行控件自身即 `adw::ActionRow`（`GtkListBoxRow` 子类），不做手工挂载。
 
-use gtk::prelude::*;
 use adw::prelude::*;
 
 use crate::utils::config::ConfigStore;
@@ -118,10 +117,10 @@ pub fn refresh_list(
     empty_label.set_visible(rows.is_empty());
     list_box.set_visible(!rows.is_empty());
 
-    if let Some(idx) = selected {
-        if let Some(row) = rows.get(idx) {
-            list_box.select_row(Some(row));
-        }
+    if let Some(idx) = selected
+        && let Some(row) = rows.get(idx)
+    {
+        list_box.select_row(Some(row));
     }
 
     rows

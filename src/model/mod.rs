@@ -8,16 +8,22 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct GameConfig {
     /// 展示名称
+    #[serde(default)]
     pub name: String,
     /// 可执行文件路径
+    #[serde(default)]
     pub executable: String,
     /// 命令行参数（按空白拆分后逐个传给 umu-run）
+    #[serde(default)]
     pub args: String,
     /// 工作目录（留空则取可执行文件所在目录）
+    #[serde(default)]
     pub work_dir: String,
     /// 渲染器启动参数（"" / -dx11 / -dx12 / -opengl / -vulkan）
+    #[serde(default)]
     pub renderer: String,
     /// 传给游戏的环境变量
+    #[serde(default)]
     pub env_vars: HashMap<String, String>,
 }
 

@@ -2,7 +2,6 @@
 
 use std::rc::Rc;
 
-use gtk::prelude::*;
 use adw::prelude::*;
 
 /// 扁平图标按钮（行尾操作统一用它）。
@@ -33,24 +32,28 @@ pub fn pick_path(row: &adw::EntryRow, title: &str, folder: bool, on_done: Rc<dyn
             None::<&gtk::gio::Cancellable>,
             move |res| {
                 let _ = &keep_alive;
-                if let Ok(file) = res {
-                    if let Some(path) = file.path() {
-                        target.set_text(&path.display().to_string());
-                        on_done();
-                    }
+                if let Ok(file) = res
+                    && let Some(path) = file.path()
+                {
+                    target.set_text(&path.display().to_string());
+                    on_done();
                 }
             },
         );
     } else {
-        dialog.open(parent.as_ref(), None::<&gtk::gio::Cancellable>, move |res| {
-            let _ = &keep_alive;
-            if let Ok(file) = res {
-                if let Some(path) = file.path() {
+        dialog.open(
+            parent.as_ref(),
+            None::<&gtk::gio::Cancellable>,
+            move |res| {
+                let _ = &keep_alive;
+                if let Ok(file) = res
+                    && let Some(path) = file.path()
+                {
                     target.set_text(&path.display().to_string());
                     on_done();
                 }
-            }
-        });
+            },
+        );
     }
 }
 

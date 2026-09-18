@@ -13,7 +13,8 @@ const UMU_RUN: &[u8] = include_bytes!("../../umu-run");
 
 pub struct Runner {
     umu_path: PathBuf,
-    python_check: bool,
+    python_check: Option<bool>,
+    python_cmd: Option<String>,
 }
 
 impl Runner {
@@ -21,7 +22,8 @@ impl Runner {
         let umu_path = ConfigStore::data_dir().join("umu-run");
         Runner {
             umu_path,
-            python_check: false,
+            python_check: None,
+            python_cmd: None,
         }
     }
 
@@ -44,22 +46,35 @@ impl Runner {
     }
 
     /// 是否有可用的 python3（umu-run 是 python zipapp）。
+    /// P1-13: 缓存实际探测到的解释器路径。
     pub fn is_python_available(&mut self) -> bool {
-        if self.python_check {
-            return true;
+        if let Some(ok) = self.python_check {
+            return ok;
         }
+        // 先尝试 python3
         let ok = Command::new("python3")
             .arg("--version")
             .output()
             .map(|o| o.status.success())
-            .unwrap_or(false)
-            || Command::new("python")
-                .arg("--version")
-                .output()
-                .map(|o| o.status.success())
-                .unwrap_or(false);
-        self.python_check = ok;
-        ok
+            .unwrap_or(false);
+        if ok {
+            self.python_check = Some(true);
+            self.python_cmd = Some("python3".to_string());
+            return true;
+        }
+        // 再尝试 python
+        let ok = Command::new("python")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if ok {
+            self.python_check = Some(true);
+            self.python_cmd = Some("python".to_string());
+            return true;
+        }
+        self.python_check = Some(false);
+        false
     }
 
     /// 启动游戏，返回子进程句柄（stdout/stderr 已接管道）。
@@ -70,21 +85,26 @@ impl Runner {
         }
 
         let mut envs: HashMap<String, String> = HashMap::new();
+        // P1-12: 空字符串回退默认值
         envs.insert(
             "GAMEID".to_string(),
             config
                 .env_vars
                 .get("GAMEID")
-                .cloned()
-                .unwrap_or_else(|| "umu-default".to_string()),
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .unwrap_or("umu-default")
+                .to_string(),
         );
         envs.insert(
             "STORE".to_string(),
             config
                 .env_vars
                 .get("STORE")
-                .cloned()
-                .unwrap_or_else(|| "none".to_string()),
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .unwrap_or("none")
+                .to_string(),
         );
         for (k, v) in &config.env_vars {
             if k != "GAMEID" && k != "STORE" {
@@ -92,8 +112,10 @@ impl Runner {
             }
         }
 
+        // P1-13: 使用实际探测到的解释器
         let mut cmd = if self.is_python_available() {
-            let mut c = Command::new("python3");
+            let python_cmd = self.python_cmd.as_deref().unwrap_or("python3");
+            let mut c = Command::new(python_cmd);
             c.arg(&self.umu_path);
             c
         } else {
@@ -106,14 +128,18 @@ impl Runner {
         if !config.renderer.trim().is_empty() {
             cmd.arg(config.renderer.trim());
         }
-        for arg in config.args.split_whitespace() {
+        // P1-14: 支持引号的参数分词
+        for arg in split_args(&config.args) {
             cmd.arg(arg);
         }
 
         if !config.work_dir.trim().is_empty() {
             cmd.current_dir(config.work_dir.trim());
         } else if !config.executable.trim().is_empty() {
-            if let Some(parent) = std::path::Path::new(config.executable.trim()).parent() {
+            // P2-15: 空 parent 时跳过 current_dir
+            if let Some(parent) = std::path::Path::new(config.executable.trim()).parent()
+                && !parent.as_os_str().is_empty()
+            {
                 cmd.current_dir(parent);
             }
         }
@@ -134,4 +160,42 @@ impl Runner {
 
         cmd.spawn().map_err(|e| format!("启动进程失败: {e}"))
     }
+}
+
+/// P1-14: 支持引号的参数分词。
+/// 比 `split_whitespace` 多支持 `"..."` 和 `'...'` 包裹的含空格参数。
+fn split_args(s: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut chars = s.chars().peekable();
+    while let Some(&ch) = chars.peek() {
+        match ch {
+            '"' | '\'' => {
+                let quote = ch;
+                chars.next(); // consume quote
+                while let Some(&c) = chars.peek() {
+                    if c == quote {
+                        chars.next(); // consume closing quote
+                        break;
+                    }
+                    current.push(c);
+                    chars.next();
+                }
+            }
+            c if c.is_whitespace() => {
+                if !current.is_empty() {
+                    result.push(std::mem::take(&mut current));
+                }
+                chars.next();
+            }
+            _ => {
+                current.push(ch);
+                chars.next();
+            }
+        }
+    }
+    if !current.is_empty() {
+        result.push(current);
+    }
+    result
 }

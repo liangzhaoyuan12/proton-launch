@@ -4,7 +4,9 @@
 
 use std::rc::Rc;
 
-use gtk::prelude::*;
+/// 环境变量行项：(key, 行控件, 是否启用判定器)。
+type BuiltEnvItem<'a> = (&'a str, EnvRow, Rc<dyn Fn() -> bool>);
+
 use adw::prelude::*;
 
 use crate::model::GameConfig;
@@ -69,6 +71,8 @@ pub struct ConfigPage {
     renderer_row: adw::ComboRow,
     env_rows: Vec<(&'static str, EnvRow)>,
     custom_rows: Vec<CustomRow>,
+    /// P0-1: 建页时的自定义 key 快照，用于 apply_to 中"先清后写"
+    custom_initial: Vec<String>,
     custom_group: adw::PreferencesGroup,
     running_badge: gtk::Label,
     pid_label: gtk::Label,
@@ -82,11 +86,7 @@ fn changed_cb<T>(handlers: &ConfigHandlers) -> impl Fn(&T) + 'static {
 }
 
 /// 顶层构建：按 `game` 的当前值填充全部控件。
-pub fn build(
-    game: &GameConfig,
-    handlers: &ConfigHandlers,
-    running_pid: Option<i32>,
-) -> ConfigPage {
+pub fn build(game: &GameConfig, handlers: &ConfigHandlers, running_pid: Option<i32>) -> ConfigPage {
     let handlers = handlers.clone();
 
     let prefs = adw::PreferencesPage::new();
@@ -105,6 +105,7 @@ pub fn build(
         renderer_row: adw::ComboRow::new(),
         env_rows: Vec::new(),
         custom_rows: Vec::new(),
+        custom_initial: Vec::new(),
         custom_group: adw::PreferencesGroup::new(),
         running_badge: gtk::Label::new(Some("运行中")),
         pid_label: gtk::Label::new(None),
@@ -198,7 +199,8 @@ fn basic_group(
     // 名称
     page.name_entry.set_title("名称");
     page.name_entry.set_text(&game.name);
-    page.name_entry.connect_changed(changed_cb::<adw::EntryRow>(handlers));
+    page.name_entry
+        .connect_changed(changed_cb::<adw::EntryRow>(handlers));
     group.add(&page.name_entry);
 
     // 可执行文件
@@ -206,8 +208,14 @@ fn basic_group(
     page.exe_entry.set_text(&game.executable);
     page.exe_entry
         .set_tooltip_text(Some("游戏可执行文件的完整路径"));
-    page.exe_entry.add_suffix(&browse_button(&page.exe_entry, "选择可执行文件", false, handlers));
-    page.exe_entry.connect_changed(changed_cb::<adw::EntryRow>(handlers));
+    page.exe_entry.add_suffix(&browse_button(
+        &page.exe_entry,
+        "选择可执行文件",
+        false,
+        handlers,
+    ));
+    page.exe_entry
+        .connect_changed(changed_cb::<adw::EntryRow>(handlers));
     group.add(&page.exe_entry);
 
     // 命令行参数
@@ -215,7 +223,8 @@ fn basic_group(
     page.args_entry.set_text(&game.args);
     page.args_entry
         .set_tooltip_text(Some("按空格拆分为多个参数，追加在可执行文件之后"));
-    page.args_entry.connect_changed(changed_cb::<adw::EntryRow>(handlers));
+    page.args_entry
+        .connect_changed(changed_cb::<adw::EntryRow>(handlers));
     group.add(&page.args_entry);
 
     // 工作目录
@@ -223,26 +232,44 @@ fn basic_group(
     page.workdir_entry.set_text(&game.work_dir);
     page.workdir_entry
         .set_tooltip_text(Some("留空则使用可执行文件所在目录"));
+    page.workdir_entry.add_suffix(&browse_button(
+        &page.workdir_entry,
+        "选择工作目录",
+        true,
+        handlers,
+    ));
     page.workdir_entry
-        .add_suffix(&browse_button(&page.workdir_entry, "选择工作目录", true, handlers));
-    page.workdir_entry.connect_changed(changed_cb::<adw::EntryRow>(handlers));
+        .connect_changed(changed_cb::<adw::EntryRow>(handlers));
     group.add(&page.workdir_entry);
 
     // Proton 版本（PROTONPATH）
     page.proton_entry.set_title("Proton 版本");
-    page.proton_entry
-        .set_text(game.env_vars.get(PROTONPATH).map(String::as_str).unwrap_or(""));
+    page.proton_entry.set_text(
+        game.env_vars
+            .get(PROTONPATH)
+            .map(String::as_str)
+            .unwrap_or(""),
+    );
     page.proton_entry
         .set_tooltip_text(Some("Proton 路径或版本号，如 GE-Proton9-5"));
+    page.proton_entry.add_suffix(&browse_button(
+        &page.proton_entry,
+        "选择 Proton 目录",
+        true,
+        handlers,
+    ));
     page.proton_entry
-        .add_suffix(&browse_button(&page.proton_entry, "选择 Proton 目录", true, handlers));
-    page.proton_entry.connect_changed(changed_cb::<adw::EntryRow>(handlers));
+        .connect_changed(changed_cb::<adw::EntryRow>(handlers));
     group.add(&page.proton_entry);
 
     // 修改器 / 注入器（PROTON_REMOTE_DEBUG_CMD）
     page.debug_entry.set_title("修改器 / 注入器");
-    page.debug_entry
-        .set_text(game.env_vars.get(DEBUG_CMD).map(String::as_str).unwrap_or(""));
+    page.debug_entry.set_text(
+        game.env_vars
+            .get(DEBUG_CMD)
+            .map(String::as_str)
+            .unwrap_or(""),
+    );
     page.debug_entry
         .set_tooltip_text(Some("启动前注入的可执行文件路径（留空不注入）"));
     page.debug_entry.add_suffix(&browse_button(
@@ -251,7 +278,8 @@ fn basic_group(
         false,
         handlers,
     ));
-    page.debug_entry.connect_changed(changed_cb::<adw::EntryRow>(handlers));
+    page.debug_entry
+        .connect_changed(changed_cb::<adw::EntryRow>(handlers));
     group.add(&page.debug_entry);
 
     // 渲染器
@@ -261,6 +289,7 @@ fn basic_group(
     page.renderer_row
         .set_subtitle("启动参数，并非所有游戏都支持");
     page.renderer_row.set_model(Some(&model));
+    // P1-18: 找不到匹配时选第一个（"不指定"）而非静默变成 -vulkan
     let selected = RENDERERS
         .iter()
         .position(|(arg, _)| *arg == game.renderer)
@@ -309,7 +338,7 @@ fn env_group(
         let expander = adw::ExpanderRow::builder().title(category.name).build();
 
         // 本分类构建出的行 + 每行「当前是否启用」的判定器（用于刷新计数副标题）。
-        let mut built: Vec<(&'static str, EnvRow, Rc<dyn Fn() -> bool>)> = Vec::new();
+        let mut built: Vec<BuiltEnvItem> = Vec::new();
 
         for def in category.vars {
             let key = def.key;
@@ -329,7 +358,10 @@ fn env_group(
                             handlers.changed.clone(),
                         );
                         let c = r.clone();
-                        (EnvRow::Text { expander: r, entry }, Rc::new(move || c.enables_expansion()))
+                        (
+                            EnvRow::Text { expander: r, entry },
+                            Rc::new(move || c.enables_expansion()),
+                        )
                     }
                 }
                 _ => {
@@ -347,7 +379,10 @@ fn env_group(
                             handlers.changed.clone(),
                         );
                         let c = r.clone();
-                        (EnvRow::Text { expander: r, entry }, Rc::new(move || c.enables_expansion()))
+                        (
+                            EnvRow::Text { expander: r, entry },
+                            Rc::new(move || c.enables_expansion()),
+                        )
                     }
                 }
             };
@@ -360,8 +395,7 @@ fn env_group(
         }
 
         // 本分类各行的「是否启用」判定器集合，供刷新计数。
-        let checkers: Vec<Rc<dyn Fn() -> bool>> =
-            built.iter().map(|(_, _, c)| c.clone()).collect();
+        let checkers: Vec<Rc<dyn Fn() -> bool>> = built.iter().map(|(_, _, c)| c.clone()).collect();
         let set_count = checkers.iter().filter(|f| f()).count();
         expander.set_subtitle(&format!("已设置 {set_count}/{total}"));
         expander.set_expanded(set_count > 0);
@@ -385,7 +419,10 @@ fn env_group(
                         cb();
                     });
                 }
-                EnvRow::Text { expander: ex, entry } => {
+                EnvRow::Text {
+                    expander: ex,
+                    entry,
+                } => {
                     let refresh = refresh.clone();
                     let cb = handlers.changed.clone();
                     ex.connect_enable_expansion_notify(move |_| {
@@ -438,6 +475,8 @@ fn custom_group(
         if catalog::is_known_key(key) {
             continue;
         }
+        // P0-1: 记录建页时已存在的自定义 key
+        page.custom_initial.push(key.clone());
         let row = CustomRow::build(key, value, &group, handlers);
         group.add(&row.expander);
         page.custom_rows.push(row);
@@ -528,8 +567,14 @@ impl ConfigPage {
         game.args = self.args_entry.text().to_string();
         game.work_dir = self.workdir_entry.text().to_string();
 
-        let renderer = self.renderer_row.selected().min(RENDERERS.len() as u32 - 1) as usize;
-        game.renderer = RENDERERS[renderer].0.to_string();
+        // P1-18: renderer 无效值时保持空字符串
+        let selected = self.renderer_row.selected();
+        game.renderer =
+            if selected == gtk::INVALID_LIST_POSITION || selected >= RENDERERS.len() as u32 {
+                String::new()
+            } else {
+                RENDERERS[selected as usize].0.to_string()
+            };
 
         set_or_remove(
             &mut game.env_vars,
@@ -562,6 +607,10 @@ impl ConfigPage {
             }
         }
 
+        // P0-1: 先清空所有初始自定义 key，再写入现存行（确保删除生效）
+        for k in &self.custom_initial {
+            game.env_vars.remove(k);
+        }
         for row in &self.custom_rows {
             // 已被删除的行：从分组移除后 parent 为空，不再取值
             if row.expander.parent().is_none() {

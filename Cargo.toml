@@ -12,3 +12,10 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 directories = "6.0"
 libc = "0.2"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"
+codegen-units = 1
