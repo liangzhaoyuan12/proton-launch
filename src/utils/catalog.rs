@@ -39,7 +39,6 @@ static BOOL_TOGGLE_KEYS: &[&str] = &[
     "FSR4_UPGRADE",
     "PROTON_FSR4_RDNA3_UPGRADE",
     "PROTON_XESS_UPGRADE",
-    "MANGOHUD",
     "PROTON_PREFER_SDL",
     "COPYPREFIX",
     "SteamDeck",
@@ -315,27 +314,6 @@ pub static ENV_CATEGORIES: &[EnvCategory] = &[
             EnvVarDef {
                 key: "PROTON_XESS_UPGRADE",
                 label: "XeSS 自动更新（0/1）",
-            },
-        ],
-    },
-    EnvCategory {
-        name: "性能监控",
-        vars: &[
-            EnvVarDef {
-                key: "GALLIUM_HUD",
-                label: "Gallium3D HUD（fps、cpu 等）",
-            },
-            EnvVarDef {
-                key: "MANGOHUD",
-                label: "MangoHud（0=禁用，1=启用）",
-            },
-            EnvVarDef {
-                key: "MANGOHUD_CONFIG",
-                label: "MangoHud 配置",
-            },
-            EnvVarDef {
-                key: "MANGOHUD_CONFIGFILE",
-                label: "MangoHud 配置文件路径",
             },
         ],
     },
