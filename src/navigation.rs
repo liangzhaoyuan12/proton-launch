@@ -2,6 +2,8 @@
 //!
 //! 这里只做「接线 + 展示」：行的增删一律通过 `gtk::ListBox` 的 append / remove_all，
 //! 行控件自身即 `adw::ActionRow`（`GtkListBoxRow` 子类），不做手工挂载。
+//!
+//! P0-6: ListBoxRow 的 widget_name 存储游戏 ID，不再依赖数组下标。
 
 use adw::prelude::*;
 
@@ -44,7 +46,6 @@ pub fn build_sidebar() -> Sidebar {
         .child(&content)
         .build();
 
-    // 标题 + 操作按钮
     let title = gtk::Label::new(Some("游戏列表"));
     title.add_css_class("heading");
     title.set_halign(gtk::Align::Start);
@@ -77,33 +78,37 @@ pub fn build_sidebar() -> Sidebar {
     }
 }
 
-/// 按当前数据重建列表行，并恢复选中；返回创建出的行（与游戏索引一一对应）。
+/// P0-6: 按当前数据重建列表行，返回 ID → 行 的映射。
 ///
-/// 调用方需在重建期间屏蔽 `row-selected` 信号（`syncing` 标记）。
+/// `selected_id` 是当前选中的游戏 ID（而非数组下标）。
+/// `is_running` 判断游戏 ID 是否正在运行。
+/// 每个 `ListBoxRow` 的 `widget_name` 存储对应游戏 ID，供 `row_selected` 回调读取。
 pub fn refresh_list(
     list_box: &gtk::ListBox,
     empty_label: &gtk::Label,
     store: &ConfigStore,
-    selected: Option<usize>,
-    is_running: &dyn Fn(usize) -> bool,
-) -> Vec<adw::ActionRow> {
+    selected_id: Option<&str>,
+    is_running: &dyn Fn(&str) -> bool,
+) -> std::collections::HashMap<String, adw::ActionRow> {
     list_box.remove_all();
 
-    let mut rows = Vec::with_capacity(store.len());
-    for (idx, game) in store.games().iter().enumerate() {
+    let mut rows = std::collections::HashMap::new();
+    for game in store.games() {
         let row = adw::ActionRow::builder()
-            .title(game.display_name(idx))
+            .title(game.display_name())
             .subtitle(game.subtitle())
             .subtitle_lines(1)
             .build();
         row.set_tooltip_text(Some(&game.subtitle()));
 
-        // 条目 = 图标 + 文字（规范 §3.4）
+        // P0-6: 把游戏 ID 存入 widget_name，供 row_selected 回调使用
+        row.set_widget_name(&game.id);
+
         let icon = gtk::Image::from_icon_name("applications-games-symbolic");
         icon.add_css_class("dim-label");
         row.add_prefix(&icon);
 
-        if is_running(idx) {
+        if is_running(&game.id) {
             let badge = gtk::Label::new(Some("运行中"));
             badge.add_css_class("success");
             badge.add_css_class("caption");
@@ -111,14 +116,15 @@ pub fn refresh_list(
         }
 
         list_box.append(&row);
-        rows.push(row);
+        rows.insert(game.id.clone(), row);
     }
 
     empty_label.set_visible(rows.is_empty());
     list_box.set_visible(!rows.is_empty());
 
-    if let Some(idx) = selected
-        && let Some(row) = rows.get(idx)
+    // 恢复选中
+    if let Some(id) = selected_id
+        && let Some(row) = rows.get(id)
     {
         list_box.select_row(Some(row));
     }
@@ -126,10 +132,10 @@ pub fn refresh_list(
     rows
 }
 
-/// 更新单行的标题 / 副标题（改名等轻量刷新，避免整表重建）。
-pub fn update_row(row: &adw::ActionRow, store: &ConfigStore, idx: usize) {
-    if let Some(game) = store.game(idx) {
-        row.set_title(&game.display_name(idx));
+/// P0-6: 按 ID 更新单行的标题 / 副标题。
+pub fn update_row(row: &adw::ActionRow, store: &ConfigStore, id: &str) {
+    if let Some(game) = store.game_by_id(id) {
+        row.set_title(game.display_name());
         row.set_subtitle(&game.subtitle());
         row.set_tooltip_text(Some(&game.subtitle()));
     }

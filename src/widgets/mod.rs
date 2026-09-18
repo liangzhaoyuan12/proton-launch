@@ -32,11 +32,18 @@ pub fn pick_path(row: &adw::EntryRow, title: &str, folder: bool, on_done: Rc<dyn
             None::<&gtk::gio::Cancellable>,
             move |res| {
                 let _ = &keep_alive;
-                if let Ok(file) = res
-                    && let Some(path) = file.path()
-                {
-                    target.set_text(&path.display().to_string());
-                    on_done();
+                match res {
+                    Ok(file) => {
+                        if let Some(path) = file.path() {
+                            target.set_text(&path.display().to_string());
+                            on_done();
+                        }
+                    }
+                    // P2-1: 补充错误反馈
+                    Err(e) => {
+                        // 忽略用户取消（Dismissed）
+                        eprintln!("选择目录失败: {e}");
+                    }
                 }
             },
         );
@@ -46,11 +53,16 @@ pub fn pick_path(row: &adw::EntryRow, title: &str, folder: bool, on_done: Rc<dyn
             None::<&gtk::gio::Cancellable>,
             move |res| {
                 let _ = &keep_alive;
-                if let Ok(file) = res
-                    && let Some(path) = file.path()
-                {
-                    target.set_text(&path.display().to_string());
-                    on_done();
+                match res {
+                    Ok(file) => {
+                        if let Some(path) = file.path() {
+                            target.set_text(&path.display().to_string());
+                            on_done();
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("选择文件失败: {e}");
+                    }
                 }
             },
         );

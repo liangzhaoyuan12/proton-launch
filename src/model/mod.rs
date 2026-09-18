@@ -1,12 +1,29 @@
 //! 数据层：纯数据结构，不依赖任何 UI 框架。
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 
+/// 全局自增计数器，配合时间戳生成唯一 ID。
+static ID_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// 生成一个在本应用内唯一的 ID。
+pub fn generate_id() -> String {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    let seq = ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{ts:016x}{seq:04x}")
+}
+
 /// 单个游戏的启动配置。
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct GameConfig {
+    /// 稳定唯一标识（P0-6: 替代数组下标做主键）
+    #[serde(default = "generate_id")]
+    pub id: String,
     /// 展示名称
     #[serde(default)]
     pub name: String,
@@ -27,20 +44,36 @@ pub struct GameConfig {
     pub env_vars: HashMap<String, String>,
 }
 
+/// 实现 Default 以兼容 serde 的 `#[serde(default)]`。
+impl Default for GameConfig {
+    fn default() -> Self {
+        Self {
+            id: generate_id(),
+            name: String::new(),
+            executable: String::new(),
+            args: String::new(),
+            work_dir: String::new(),
+            renderer: String::new(),
+            env_vars: HashMap::new(),
+        }
+    }
+}
+
 impl GameConfig {
     pub fn new(name: &str) -> Self {
         Self {
+            id: generate_id(),
             name: name.to_string(),
             ..Default::default()
         }
     }
 
-    /// 侧边栏展示名称（未命名时回退到编号）。
-    pub fn display_name(&self, idx: usize) -> String {
+    /// 侧边栏展示名称（未命名时回退到"未命名"）。
+    pub fn display_name(&self) -> &str {
         if self.name.trim().is_empty() {
-            format!("未命名 #{}", idx + 1)
+            "未命名"
         } else {
-            self.name.clone()
+            &self.name
         }
     }
 

@@ -8,6 +8,7 @@ use std::rc::Rc;
 type BuiltEnvItem<'a> = (&'a str, EnvRow, Rc<dyn Fn() -> bool>);
 
 use adw::prelude::*;
+use gtk::glib;
 
 use crate::model::GameConfig;
 use crate::utils::catalog::{self, ENV_CATEGORIES};
@@ -314,9 +315,15 @@ fn browse_button(
         "document-open-symbolic"
     };
     let button = widgets::icon_button(icon, tooltip);
-    let target = row.clone();
+    // P1-9: 用 WeakRef 避免 row → button → 闭包 → row 循环
+    let weak_row = glib::WeakRef::new();
+    weak_row.set(Some(row));
     let cb = handlers.changed.clone();
-    button.connect_clicked(move |_| widgets::pick_path(&target, tooltip, folder, cb.clone()));
+    button.connect_clicked(move |_| {
+        if let Some(target) = weak_row.upgrade() {
+            widgets::pick_path(&target, tooltip, folder, cb.clone());
+        }
+    });
     button
 }
 
@@ -346,8 +353,12 @@ fn env_group(
                 Some(value) if catalog::is_enabled(key, value) => {
                     if catalog::is_bool_toggle(key) {
                         let r = widgets::bool_env_row(def.label, key, true);
-                        let c = r.clone();
-                        (EnvRow::Bool(r), Rc::new(move || c.is_active()))
+                        let weak = glib::WeakRef::new();
+                        weak.set(Some(&r));
+                        (
+                            EnvRow::Bool(r),
+                            Rc::new(move || weak.upgrade().is_some_and(|w| w.is_active())),
+                        )
                     } else {
                         let browse = browse_hint(key);
                         let (r, entry) = widgets::text_env_row(
@@ -357,18 +368,23 @@ fn env_group(
                             browse,
                             handlers.changed.clone(),
                         );
-                        let c = r.clone();
+                        let weak = glib::WeakRef::new();
+                        weak.set(Some(&r));
                         (
                             EnvRow::Text { expander: r, entry },
-                            Rc::new(move || c.enables_expansion()),
+                            Rc::new(move || weak.upgrade().is_some_and(|w| w.enables_expansion())),
                         )
                     }
                 }
                 _ => {
                     if catalog::is_bool_toggle(key) {
                         let r = widgets::bool_env_row(def.label, key, false);
-                        let c = r.clone();
-                        (EnvRow::Bool(r), Rc::new(move || c.is_active()))
+                        let weak = glib::WeakRef::new();
+                        weak.set(Some(&r));
+                        (
+                            EnvRow::Bool(r),
+                            Rc::new(move || weak.upgrade().is_some_and(|w| w.is_active())),
+                        )
                     } else {
                         let browse = browse_hint(key);
                         let (r, entry) = widgets::text_env_row(
@@ -378,10 +394,11 @@ fn env_group(
                             browse,
                             handlers.changed.clone(),
                         );
-                        let c = r.clone();
+                        let weak = glib::WeakRef::new();
+                        weak.set(Some(&r));
                         (
                             EnvRow::Text { expander: r, entry },
-                            Rc::new(move || c.enables_expansion()),
+                            Rc::new(move || weak.upgrade().is_some_and(|w| w.enables_expansion())),
                         )
                     }
                 }
@@ -402,10 +419,13 @@ fn env_group(
 
         // 切换任意开关时刷新「已设置 X/N」副标题，同时同步内存。
         let refresh: Rc<dyn Fn()> = Rc::new({
-            let expander = expander.clone();
+            let weak_exp = glib::WeakRef::new();
+            weak_exp.set(Some(&expander));
             move || {
-                let n = checkers.iter().filter(|f| f()).count();
-                expander.set_subtitle(&format!("已设置 {n}/{total}"));
+                if let Some(exp) = weak_exp.upgrade() {
+                    let n = checkers.iter().filter(|f| f()).count();
+                    exp.set_subtitle(&format!("已设置 {n}/{total}"));
+                }
             }
         });
 
@@ -511,24 +531,31 @@ impl CustomRow {
         let delete = widgets::icon_button("user-trash-symbolic", "删除该变量");
         expander.add_suffix(&delete);
 
-        // 标题跟随变量名
+        // P1-10: 标题跟随变量名 — 用 WeakRef 避免 expander 引用环
         {
-            let expander = expander.clone();
+            let weak_exp = glib::WeakRef::new();
+            weak_exp.set(Some(&expander));
             key_entry.connect_changed(move |entry| {
-                expander.set_title(display_key(entry.text().as_str()));
+                if let Some(exp) = weak_exp.upgrade() {
+                    exp.set_title(display_key(entry.text().as_str()));
+                }
             });
         }
         key_entry.connect_changed(changed_cb::<adw::EntryRow>(handlers));
         value_entry.connect_changed(changed_cb::<adw::EntryRow>(handlers));
 
-        // 删除：从分组移除（parent 置空后不再参与取值），并触发一次同步
+        // P1-10: 删除 — 用 WeakRef 避免 group/expander 引用环
         {
-            let group = group.clone();
-            let expander = expander.clone();
+            let weak_group = glib::WeakRef::new();
+            weak_group.set(Some(group));
+            let weak_exp = glib::WeakRef::new();
+            weak_exp.set(Some(&expander));
             let cb = handlers.changed.clone();
             delete.connect_clicked(move |_| {
-                group.remove(&expander);
-                cb();
+                if let (Some(g), Some(e)) = (weak_group.upgrade(), weak_exp.upgrade()) {
+                    g.remove(&e);
+                    cb();
+                }
             });
         }
 

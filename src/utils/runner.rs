@@ -28,8 +28,14 @@ impl Runner {
     }
 
     /// 首次运行时把内嵌的 umu-run 释放到数据目录。
+    /// P2-3: 版本检查 — 内嵌内容变化时覆盖旧文件。
     pub fn extract_umu(&self) -> Result<(), String> {
-        if self.umu_path.exists() {
+        let version_path = self.umu_path.with_extension("version");
+        let current_ver = UMU_RUN.len().to_string();
+        // 比较版本戳：一致则跳过
+        if let Ok(ver) = fs::read_to_string(&version_path)
+            && ver.trim() == current_ver
+        {
             return Ok(());
         }
         let parent = self.umu_path.parent().ok_or("无效的 umu-run 路径")?;
@@ -42,6 +48,8 @@ impl Runner {
             fs::set_permissions(&self.umu_path, fs::Permissions::from_mode(0o755))
                 .map_err(|e| e.to_string())?;
         }
+        // 写入版本戳
+        let _ = fs::write(&version_path, &current_ver);
         Ok(())
     }
 

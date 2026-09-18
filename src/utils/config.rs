@@ -15,8 +15,10 @@ struct ConfigFile {
     games: Vec<GameConfig>,
 }
 
-fn project_dirs() -> ProjectDirs {
-    ProjectDirs::from("com", "proton-launch", "proton-launch").expect("无法确定配置目录")
+/// P2-2: ProjectDirs 不再 panic，返回 Result 由调用方处理。
+fn project_dirs() -> Result<ProjectDirs, String> {
+    ProjectDirs::from("com", "proton-launch", "proton-launch")
+        .ok_or_else(|| "无法确定配置目录（$HOME 可能未设置）".to_string())
 }
 
 /// 游戏列表的内存副本 + 磁盘持久化。
@@ -27,7 +29,20 @@ pub struct ConfigStore {
 
 impl ConfigStore {
     pub fn new() -> (Self, Option<String>) {
-        let path = project_dirs().config_dir().join("games.json");
+        let (pd, load_error_init) = match project_dirs() {
+            Ok(pd) => (pd, None),
+            Err(e) => {
+                // 无法确定配置目录，返回空配置 + 错误信息
+                return (
+                    ConfigStore {
+                        path: std::path::PathBuf::from("games.json"),
+                        games: Vec::new(),
+                    },
+                    Some(e),
+                );
+            }
+        };
+        let path = pd.config_dir().join("games.json");
         let mut error_msg = None;
         let games = match fs::read_to_string(&path) {
             Ok(content) => match serde_json::from_str::<ConfigFile>(&content) {
@@ -55,15 +70,21 @@ impl ConfigStore {
             },
             Err(_) => Vec::new(),
         };
-        (ConfigStore { path, games }, error_msg)
+        (ConfigStore { path, games }, load_error_init.or(error_msg))
     }
 
     pub fn games(&self) -> &[GameConfig] {
         &self.games
     }
 
-    pub fn game(&self, idx: usize) -> Option<&GameConfig> {
-        self.games.get(idx)
+    /// 按 ID 查找游戏。
+    pub fn game_by_id(&self, id: &str) -> Option<&GameConfig> {
+        self.games.iter().find(|g| g.id == id)
+    }
+
+    /// 按 ID 查找索引位置。
+    pub fn index_of_id(&self, id: &str) -> Option<usize> {
+        self.games.iter().position(|g| g.id == id)
     }
 
     pub fn len(&self) -> usize {
@@ -74,21 +95,22 @@ impl ConfigStore {
         self.games.is_empty()
     }
 
-    /// 追加游戏并返回其索引。
-    pub fn add_game(&mut self, game: GameConfig) -> usize {
+    /// 追加游戏并返回其 ID。
+    pub fn add_game(&mut self, game: GameConfig) -> String {
+        let id = game.id.clone();
         self.games.push(game);
-        self.games.len() - 1
+        id
     }
 
-    pub fn remove_game(&mut self, idx: usize) {
-        if idx < self.games.len() {
-            self.games.remove(idx);
-        }
+    /// 按 ID 删除游戏。
+    pub fn remove_game_by_id(&mut self, id: &str) {
+        self.games.retain(|g| g.id != id);
     }
 
-    pub fn update_game(&mut self, idx: usize, game: GameConfig) {
-        if idx < self.games.len() {
-            self.games[idx] = game;
+    /// 按 ID 更新游戏。
+    pub fn update_game_by_id(&mut self, id: &str, game: GameConfig) {
+        if let Some(g) = self.games.iter_mut().find(|g| g.id == id) {
+            *g = game;
         }
     }
 
@@ -117,6 +139,8 @@ impl ConfigStore {
 
     /// 应用数据目录（umu-run 落盘位置）。
     pub fn data_dir() -> PathBuf {
-        project_dirs().data_dir().to_path_buf()
+        project_dirs()
+            .map(|pd| pd.data_dir().to_path_buf())
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
     }
 }

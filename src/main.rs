@@ -16,5 +16,9 @@ fn main() -> glib::ExitCode {
         .application_id(window::APP_ID)
         .build();
     application.connect_activate(window::build);
+    // P1-4: 应用退出时终止所有子进程
+    application.connect_shutdown(|_| {
+        app::shutdown();
+    });
     application.run()
 }

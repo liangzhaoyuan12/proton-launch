@@ -84,10 +84,19 @@ pub fn build(application: &adw::Application) {
         });
     }
     // 折叠态才显示汉堡按钮：折叠时 show_content == false 即「正在显示侧边栏」
+    // P1-11: 用 WeakRef 避免 split_view/toggle → sync → clone 循环
     {
-        let watched = split_view.clone();
-        let toggle = toggle.clone();
+        let weak_watched = glib::WeakRef::new();
+        weak_watched.set(Some(&split_view));
+        let weak_toggle = glib::WeakRef::new();
+        weak_toggle.set(Some(&toggle));
         let sync: Rc<dyn Fn()> = Rc::new(move || {
+            let Some(watched) = weak_watched.upgrade() else {
+                return;
+            };
+            let Some(toggle) = weak_toggle.upgrade() else {
+                return;
+            };
             let collapsed = watched.is_collapsed();
             toggle.set_visible(collapsed);
             let sidebar_shown = collapsed && !watched.shows_content();
