@@ -51,7 +51,7 @@ pub fn build(application: &adw::Application) {
     toast_overlay.set_child(Some(&split_view));
 
     // ── 窗口骨架 ─────────────────────────────────────────────────────────
-    let (status_bar, status_label, running_label) = build_status_bar();
+    let (status_bar, status_label, running_label, gamepad_indicator) = build_status_bar();
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&header);
     toolbar.set_content(Some(&toast_overlay));
@@ -134,14 +134,20 @@ pub fn build(application: &adw::Application) {
         config_bin,
         status_label,
         running_label,
+        gamepad_indicator,
         add_button: sidebar.add_button,
         delete_button: sidebar.delete_button,
         about_button,
     });
 }
 
-/// 底部状态栏：左侧状态文字，右侧运行计数。
-fn build_status_bar() -> (gtk::Box, gtk::Label, gtk::Label) {
+/// 底部状态栏：左侧状态文字，右侧运行计数 + 手柄指示器（右下角）。
+fn build_status_bar() -> (
+    gtk::Box,
+    gtk::Label,
+    gtk::Label,
+    Rc<crate::widgets::gamepad_indicator::GamepadIndicator>,
+) {
     let bar = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     bar.set_margin_top(6);
     bar.set_margin_bottom(6);
@@ -157,9 +163,12 @@ fn build_status_bar() -> (gtk::Box, gtk::Label, gtk::Label) {
     let running = gtk::Label::new(None);
     running.add_css_class("dim-label");
 
+    let gamepad_indicator = crate::widgets::gamepad_indicator::GamepadIndicator::new();
+
     bar.append(&status);
     bar.append(&running);
-    (bar, status, running)
+    bar.append(gamepad_indicator.button());
+    (bar, status, running, gamepad_indicator)
 }
 
 /// 主菜单：外观（跟随系统 / 浅色 / 深色）。

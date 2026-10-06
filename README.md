@@ -23,6 +23,8 @@ This project aims to create a high-performance, high-stability Proton game manag
 - **Unsaved Changes Protection** — Edits are cached in memory; switching items preserves your work. Close confirmation dialog warns before discarding unsaved changes
 - **Per-game Runtime Logs** — stdout/stderr captured in real-time, viewable via the 日志 button with copy-to-clipboard support. Logs are in-memory only and cleared on app restart
 - **Native GNOME UI** — GTK4 + libadwaita widgets, follows the system light/dark theme, collapses to stack navigation on narrow windows
+- **Gamepad Status** — Bottom-right indicator shows the number of connected gamepads; open the card for each pad's name, protocol (Xbox 360 / Xbox One / Xbox Series X|S / PS4 / PS5 / Nintendo), `/dev/input` node, vendor:product ID, input ID, bus, kernel driver, serial/MAC, physical path, button/axis counts and force-feedback support
+  - Connecting or disconnecting a pad while the app is open pops a desktop notification plus an in-app toast; events while the app is closed produce no notification — the next launch simply shows the current state (no background daemon)
 - **Persistent Config** — JSON format, saved to `~/.config/proton-launch/games.json`
 
 ## Dependencies

@@ -4,7 +4,7 @@
 //! 本模块持有唯一的强引用 [`APP`]，回调里一律只拿 `Weak`，避免引用环。
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::process::Child;
 use std::rc::{Rc, Weak};
 use std::sync::{Arc, Mutex};
@@ -18,6 +18,8 @@ use crate::model::GameConfig;
 use crate::navigation;
 use crate::page::config::{ConfigHandlers, ConfigPage};
 use crate::utils::config::ConfigStore;
+use crate::utils::gamepad::{self, GamepadInfo};
+use crate::utils::notify;
 use crate::utils::runner::Runner;
 
 /// 运行中的进程。
@@ -78,6 +80,7 @@ pub struct Ui {
     pub config_bin: adw::Bin,
     pub status_label: gtk::Label,
     pub running_label: gtk::Label,
+    pub gamepad_indicator: Rc<crate::widgets::gamepad_indicator::GamepadIndicator>,
     pub add_button: gtk::Button,
     pub delete_button: gtk::Button,
     pub about_button: gtk::Button,
@@ -130,6 +133,13 @@ pub struct App {
     /// P1-3: 使用环形缓冲替代无限 Vec。
     logs: HashMap<String, Arc<Mutex<LogBuffer>>>,
 
+    /// 已连接手柄，主键为 event 节点（多手柄各自独立）。
+    gamepads: HashMap<String, GamepadInfo>,
+    /// 热插拔监听线程（软件存活期内存在，退出即停）。
+    gamepad_monitor: Option<gamepad::Monitor>,
+    /// 取走监听线程快照的主循环定时器。
+    gamepad_source: Option<glib::SourceId>,
+
     // 界面
     ui: Ui,
     sidebar_rows: HashMap<String, adw::ActionRow>,
@@ -153,6 +163,9 @@ impl App {
             selected: None,
             running: HashMap::new(),
             logs: HashMap::new(),
+            gamepads: HashMap::new(),
+            gamepad_monitor: None,
+            gamepad_source: None,
             ui,
             sidebar_rows: HashMap::new(),
             config_page: None,
@@ -305,6 +318,108 @@ impl App {
         }
         self.refresh_sidebar();
         self.update_running_ui();
+        self.start_gamepad_monitor();
+    }
+
+    // ─── 手柄连接状态 ────────────────────────────────────────────────────
+
+    /// 启动手柄监测：先把**当前已连接**的手柄渲染进右下角（不弹通知——
+    /// 软件打开前就插着的手柄只展示），随后监听热插拔。
+    fn start_gamepad_monitor(&mut self) {
+        let initial = gamepad::scan();
+        self.apply_gamepads(initial.clone(), false);
+        self.gamepad_monitor = Some(gamepad::Monitor::start(initial));
+
+        let me = self.me.clone();
+        self.gamepad_source = Some(glib::timeout_add_local(
+            Duration::from_millis(400),
+            move || {
+                with_app(&me, |app| app.drain_gamepad_events());
+                glib::ControlFlow::Continue
+            },
+        ));
+    }
+
+    /// 主循环取走监听线程攒下的快照（通常为空）。
+    fn drain_gamepad_events(&mut self) {
+        let snapshots = self
+            .gamepad_monitor
+            .as_ref()
+            .map(|monitor| monitor.drain())
+            .unwrap_or_default();
+        for snapshot in snapshots {
+            self.apply_gamepads(snapshot, true);
+        }
+    }
+
+    /// 刷新手柄列表并更新右下角计数/卡片。
+    ///
+    /// `announce` 为真时，对**新插入**的手柄发系统通知 + Toast 并改写状态栏；
+    /// 拔出只更新状态栏（不弹窗）。`announce` 为假只用于启动首帧。
+    fn apply_gamepads(&mut self, pads: Vec<GamepadInfo>, announce: bool) {
+        let before: HashSet<String> = self.gamepads.keys().cloned().collect();
+        let now: HashSet<&str> = pads.iter().map(|p| p.id()).collect();
+        let added: Vec<&GamepadInfo> = pads.iter().filter(|p| !before.contains(p.id())).collect();
+        let removed: Vec<String> = self
+            .gamepads
+            .values()
+            .filter(|g| !now.contains(g.id()))
+            .map(|g| g.name.clone())
+            .collect();
+
+        self.gamepads = pads
+            .iter()
+            .map(|p| (p.id().to_string(), p.clone()))
+            .collect();
+        self.ui.gamepad_indicator.update(&pads);
+
+        let total = pads.len();
+        if announce && !added.is_empty() {
+            let quoted: Vec<String> = added.iter().map(|p| format!("「{}」", p.name)).collect();
+            let listed: Vec<String> = added
+                .iter()
+                .map(|p| format!("{} · {}", p.name, p.protocol.label()))
+                .collect();
+            let msg = if quoted.len() == 1 {
+                format!("{}手柄已连接（当前 {total} 个）", quoted[0])
+            } else {
+                format!(
+                    "已连接 {} 个手柄：{}（当前 {total} 个）",
+                    quoted.len(),
+                    quoted.join("、")
+                )
+            };
+            self.set_status(&msg, false);
+            self.toast(&msg, false);
+            notify::desktop(
+                "手柄已连接",
+                &format!("{}\n当前已连接 {total} 个手柄", listed.join("\n")),
+                "input-gamepad-symbolic",
+            );
+        }
+        if announce && !removed.is_empty() {
+            // 拔出：状态栏 + Toast + 系统通知，与连接事件对称
+            let msg = if removed.len() == 1 {
+                format!("「{}」手柄已断开（当前 {total} 个）", removed[0])
+            } else {
+                format!(
+                    "已拔出 {} 个手柄：{}（当前 {total} 个）",
+                    removed.len(),
+                    removed
+                        .iter()
+                        .map(|n| format!("「{n}」"))
+                        .collect::<Vec<_>>()
+                        .join("、")
+                )
+            };
+            self.set_status(&msg, false);
+            self.toast(&msg, false);
+            notify::desktop(
+                "手柄已断开",
+                &format!("{}\n当前已连接 {total} 个手柄", removed.join("\n")),
+                "input-gamepad-symbolic",
+            );
+        }
     }
 
     fn build_handlers(&self) -> ConfigHandlers {
@@ -857,6 +972,13 @@ pub fn shutdown() {
         if let Some(app) = slot.borrow().as_ref()
             && let Ok(mut app) = app.try_borrow_mut()
         {
+            // 停掉手柄监听线程：软件不驻留后台，退出即彻底结束
+            if let Some(monitor) = app.gamepad_monitor.take() {
+                monitor.stop();
+            }
+            if let Some(source) = app.gamepad_source.take() {
+                source.remove();
+            }
             for (_, mut state) in app.running.drain() {
                 if !state.done {
                     let pid = state.child.id() as i32;

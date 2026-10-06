@@ -5,4 +5,6 @@
 
 pub mod catalog;
 pub mod config;
+pub mod gamepad;
+pub mod notify;
 pub mod runner;
