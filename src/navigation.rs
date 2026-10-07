@@ -10,6 +10,10 @@ use adw::prelude::*;
 use crate::utils::config::ConfigStore;
 use crate::widgets;
 
+/// 侧边栏恒在视窗最底部的「手柄状态」行的 `widget_name`
+/// （见 A8：入口不进游戏列表，独立固定在侧栏视窗底部，不随列表滚动 / 重建移动）。
+pub const GAMEPAD_ROW_ID: &str = "gamepad-state";
+
 /// 侧边栏控件集合。
 pub struct Sidebar {
     pub page: adw::NavigationPage,
@@ -17,6 +21,10 @@ pub struct Sidebar {
     pub empty_label: gtk::Label,
     pub add_button: gtk::Button,
     pub delete_button: gtk::Button,
+    /// 恒在视窗最底部的手柄状态行。
+    pub gamepad_row: adw::ActionRow,
+    /// 承载手柄状态行的固定区列表（独立于游戏列表，恒贴侧栏视窗底部）。
+    pub gamepad_list_box: gtk::ListBox,
 }
 
 /// 构建左侧游戏列表。
@@ -35,6 +43,26 @@ pub fn build_sidebar() -> Sidebar {
     empty_label.set_margin_start(12);
     empty_label.set_margin_end(12);
     empty_label.set_visible(false);
+
+    let gamepad_row = adw::ActionRow::builder()
+        .title("手柄状态")
+        .subtitle("实时输入 · 键程当量 · 振动测试")
+        .subtitle_lines(1)
+        .build();
+    gamepad_row.set_widget_name(GAMEPAD_ROW_ID);
+    let gamepad_icon = gtk::Image::from_icon_name("input-gamepad-symbolic");
+    gamepad_icon.add_css_class("dim-label");
+    gamepad_row.add_prefix(&gamepad_icon);
+
+    // A8：手柄状态行放进**独立**的固定区列表，不参与游戏列表的 remove_all() 重建，
+    // 因此恒贴侧栏视窗底部（列表滚动 / 增删 / 窗口缩放都不动它）。
+    // 单独加 navigation-sidebar 类，保证行样式与上方游戏行一致。
+    let gamepad_list_box = gtk::ListBox::builder()
+        .selection_mode(gtk::SelectionMode::Single)
+        .activate_on_single_click(true)
+        .build();
+    gamepad_list_box.add_css_class("navigation-sidebar");
+    gamepad_list_box.append(&gamepad_row);
 
     let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
     content.append(&list_box);
@@ -64,10 +92,14 @@ pub fn build_sidebar() -> Sidebar {
     header.append(&add_button);
     header.append(&delete_button);
 
+    // 侧栏骨架：头部 → 分隔线 → 可滚动游戏列表 → 分隔线 → 底部固定区（手柄状态）。
+    // 只有中间的 scrolled 参与伸缩，所以底部固定区恒贴侧栏视窗底部。
     let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
     root.append(&header);
     root.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
     root.append(&scrolled);
+    root.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+    root.append(&gamepad_list_box);
 
     Sidebar {
         page: adw::NavigationPage::new(&root, "游戏列表"),
@@ -75,6 +107,8 @@ pub fn build_sidebar() -> Sidebar {
         empty_label,
         add_button,
         delete_button,
+        gamepad_row,
+        gamepad_list_box,
     }
 }
 
@@ -120,7 +154,9 @@ pub fn refresh_list(
     }
 
     empty_label.set_visible(rows.is_empty());
-    list_box.set_visible(!rows.is_empty());
+    // 列表本身恒可见：即便一款游戏都没有，侧栏视窗底部还有「手柄状态」固定行（A8），
+    // 它在独立的固定区里，不归本函数管，也不会被这里 remove_all() 删掉。
+    list_box.set_visible(true);
 
     // 恢复选中
     if let Some(id) = selected_id

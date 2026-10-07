@@ -1,6 +1,7 @@
 //! 展示层 · 可复用复合控件（图标按钮、文件选择、环境变量行、手柄指示器）。
 
 pub mod gamepad_indicator;
+pub mod gamepad_viz;
 
 use std::rc::Rc;
 

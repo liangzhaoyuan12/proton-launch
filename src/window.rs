@@ -138,6 +138,8 @@ pub fn build(application: &adw::Application) {
         add_button: sidebar.add_button,
         delete_button: sidebar.delete_button,
         about_button,
+        gamepad_row: sidebar.gamepad_row,
+        gamepad_list_box: sidebar.gamepad_list_box,
     });
 }
 

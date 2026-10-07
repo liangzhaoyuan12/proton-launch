@@ -6,5 +6,7 @@
 pub mod catalog;
 pub mod config;
 pub mod gamepad;
+pub mod gamepad_ff;
+pub mod gamepad_input;
 pub mod notify;
 pub mod runner;

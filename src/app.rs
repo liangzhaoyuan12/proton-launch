@@ -19,6 +19,8 @@ use crate::navigation;
 use crate::page::config::{ConfigHandlers, ConfigPage};
 use crate::utils::config::ConfigStore;
 use crate::utils::gamepad::{self, GamepadInfo};
+use crate::utils::gamepad_ff::{FfWriter, Motor, PULSE_MS, magnitudes};
+use crate::utils::gamepad_input::{InputMsg, InputReader};
 use crate::utils::notify;
 use crate::utils::runner::Runner;
 
@@ -84,6 +86,10 @@ pub struct Ui {
     pub add_button: gtk::Button,
     pub delete_button: gtk::Button,
     pub about_button: gtk::Button,
+    /// 恒在侧栏视窗最底部的「手柄状态」行（A8）。
+    pub gamepad_row: adw::ActionRow,
+    /// 承载该行的固定区列表（独立于游戏列表 `list_box`，不参与列表重建）。
+    pub gamepad_list_box: gtk::ListBox,
 }
 
 thread_local! {
@@ -101,7 +107,84 @@ pub fn launch(ui: Ui) {
     state.borrow_mut().me = Rc::downgrade(&state);
     APP.with(|slot| *slot.borrow_mut() = Some(state.clone()));
     state.borrow_mut().boot();
+    // present() 期间保持 `&App` 借用：窗口 show 时 GTK 会做一次初始焦点遍历
+    // （`gtk_window_show` → `gtk_window_move_focus`），焦点落到侧栏底部固定区的
+    // 「手柄状态」行时 GTK 会**顺带选中该行**（`gtk_list_box_row_focus` →
+    // `gtk_list_box_update_selection`），此时行选中回调被 `with_app` 的重入保护丢掉，
+    // 切页逻辑不会跑——选中态留到首帧后由 `settle_first_frame` 收敛。
+    // 不要改成「先 clone window 再 present」，那样回调会执行、首帧会切到手柄状态页。
     state.borrow().ui.window.present();
+    let state_for_idle = state.clone();
+    glib::idle_add_local_once(move || {
+        if let Ok(mut app) = state_for_idle.try_borrow_mut() {
+            app.settle_first_frame();
+        }
+    });
+}
+
+impl App {
+    /// 首帧后的收敛（`launch` 在 `present()` 之后用 idle 调一次）。
+    ///
+    /// 启动瞬间的初始焦点遍历会把焦点送进底部固定区的「手柄状态」行，GTK 焦点进入
+    /// `ListBox` 行即选中 → 「游戏行 + 手柄状态行」同时高亮。这里按当前页把两个
+    /// ListBox 的选中态对齐回「同一时刻只有一条高亮」，并把焦点交回当前页对应的行
+    /// （否则键盘焦点停在手柄行上，回车/空格会直接切页）。
+    fn settle_first_frame(&mut self) {
+        self.sync_sidebar_selection();
+
+        let on_gamepad = self.ui.stack.visible_child_name().as_deref() == Some("gamepad");
+        let target: Option<gtk::Widget> = if on_gamepad {
+            Some(self.ui.gamepad_row.clone().upcast())
+        } else if let Some(id) = self.selected.as_deref()
+            && let Some(row) = self.sidebar_rows.get(id)
+        {
+            Some(row.clone().upcast())
+        } else {
+            // 空列表（欢迎页）：焦点给「添加游戏」按钮
+            Some(self.ui.add_button.clone().upcast())
+        };
+        if let Some(target) = target {
+            gtk::prelude::GtkWindowExt::set_focus(&self.ui.window, Some(&target));
+        }
+        eprintln!(
+            "[SEL] settle_first_frame: 游戏行={:?} 手柄行={:?}",
+            self.ui
+                .list_box
+                .selected_row()
+                .map(|r| r.widget_name().to_string()),
+            self.ui.gamepad_list_box.selected_row().is_some()
+        );
+    }
+
+    /// 把两个 ListBox（游戏列表 / 底部固定区）的选中态按当前页对齐为
+    /// 「同一时刻只有一条高亮」：非手柄页反选手柄行、补选当前游戏行；手柄页反之。
+    fn sync_sidebar_selection(&mut self) {
+        let on_gamepad = self.ui.stack.visible_child_name().as_deref() == Some("gamepad");
+        // syncing 屏蔽游戏列表的 row_selected → select_game 重入
+        self.syncing.set(true);
+        if on_gamepad {
+            self.ui.list_box.select_row(None::<&gtk::ListBoxRow>);
+            if self.ui.gamepad_list_box.selected_row().is_none() {
+                self.ui
+                    .gamepad_list_box
+                    .select_row(Some(&self.ui.gamepad_row));
+            }
+        } else {
+            self.ui
+                .gamepad_list_box
+                .select_row(None::<&gtk::ListBoxRow>);
+            let row = self
+                .selected
+                .as_deref()
+                .and_then(|id| self.sidebar_rows.get(id));
+            if let Some(row) = row
+                && self.ui.list_box.selected_row().is_none()
+            {
+                self.ui.list_box.select_row(Some(row));
+            }
+        }
+        self.syncing.set(false);
+    }
 }
 
 /// 在回调里拿到 `App`：借用失败（重入）时安静返回，不 panic。
@@ -139,6 +222,22 @@ pub struct App {
     gamepad_monitor: Option<gamepad::Monitor>,
     /// 取走监听线程快照的主循环定时器。
     gamepad_source: Option<glib::SourceId>,
+    /// 「手柄状态」页（GOAL.md P2 起）。
+    gamepad_page: Option<crate::page::gamepad::GamepadPage>,
+    /// 当前在页面下拉里选中的设备下标。
+    gamepad_index: Option<u32>,
+    /// P3 手柄状态页的输入读取：通道 + 读取线程 + 主循环定时器。
+    gamepad_input_rx: Option<std::sync::mpsc::Receiver<InputMsg>>,
+    gamepad_reader: Option<InputReader>,
+    gamepad_input_source: Option<glib::SourceId>,
+    /// 正在读取的 event 节点（防止重复启动读取线程）。
+    gamepad_node: Option<String>,
+    /// P5 振动：写入句柄（懒打开，换设备 / 断开即丢）。
+    gamepad_ff: Option<FfWriter>,
+    /// P5 振动：纪元 —— 每次开始/停止都递增，让过期的定时停失效。
+    rumble_epoch: u64,
+    /// P5 振动：当前是否正在振动（停止日志去重用）。
+    rumble_active: bool,
 
     // 界面
     ui: Ui,
@@ -166,6 +265,15 @@ impl App {
             gamepads: HashMap::new(),
             gamepad_monitor: None,
             gamepad_source: None,
+            gamepad_page: None,
+            gamepad_index: None,
+            gamepad_input_rx: None,
+            gamepad_reader: None,
+            gamepad_input_source: None,
+            gamepad_node: None,
+            gamepad_ff: None,
+            rumble_epoch: 0,
+            rumble_active: false,
             ui,
             sidebar_rows: HashMap::new(),
             config_page: None,
@@ -202,6 +310,28 @@ impl App {
     fn boot(&mut self) {
         self.handlers = self.build_handlers();
 
+        // GOAL.md P2: 「手柄状态」页挂到内容区 Stack（页面本身只组装控件）
+        {
+            let me = self.me.clone();
+            let me_device = me.clone();
+            let me_press = me.clone();
+            let handlers = crate::page::gamepad::GamepadHandlers {
+                device_selected: Rc::new(move |index| {
+                    with_app(&me_device, |app| app.on_device_selected(index));
+                }),
+                // P5：页面只发意图；上传/播放、1s 与 2s 定时停都在 app 层
+                rumble_press: Rc::new(move |motor, pct| {
+                    with_app(&me_press, |app| app.on_rumble_press(motor, pct));
+                }),
+                rumble_release: Rc::new(move || {
+                    with_app(&me, |app| app.on_rumble_release());
+                }),
+            };
+            let page = crate::page::gamepad::build(handlers);
+            self.ui.stack.add_named(&page.root, Some("gamepad"));
+            self.gamepad_page = Some(page);
+        }
+
         // 侧边栏操作
         {
             let me = self.me.clone();
@@ -223,12 +353,42 @@ impl App {
                 if syncing.get() {
                     return;
                 }
-                let Some(row) = row else { return };
-                let Some(game_id) = row.widget_name().to_string().into() else {
+                let Some(row) = row else {
+                    eprintln!("[SEL] main list row_selected(None)");
+                    return;
+                };
+                let widget_name = row.widget_name().to_string();
+                eprintln!("[SEL] main list row_selected({widget_name})");
+                let Some(game_id) = widget_name.into() else {
                     return;
                 };
                 with_app(&me, |app| app.select_game(&game_id));
             });
+        }
+
+        // A8: 底部固定区的手柄状态行（独立 ListBox）→ 切到手柄状态页
+        {
+            let me = self.me.clone();
+            self.ui
+                .gamepad_list_box
+                .connect_row_selected(move |_, row| {
+                    eprintln!(
+                        "[SEL] gamepad list row_selected fired, row={:?}",
+                        row.as_ref().map(|r| r.widget_name().to_string())
+                    );
+                    // 只处理「选中本行」：反选（None）是切走页面时的清理动作
+                    let Some(row) = row else { return };
+                    if row.widget_name() != navigation::GAMEPAD_ROW_ID {
+                        return;
+                    }
+                    with_app(&me, |app| {
+                        // 幂等保护：焦点导航把选中落到本行时同样会触发本回调，
+                        // 已在本页就直接跳过，避免重复切 Stack 子页。
+                        if app.ui.stack.visible_child_name().as_deref() != Some("gamepad") {
+                            app.show_gamepad_page();
+                        }
+                    });
+                });
         }
 
         // 关于
@@ -373,6 +533,20 @@ impl App {
             .collect();
         self.ui.gamepad_indicator.update(&pads);
 
+        // 手柄状态页跟着热插拔走：刷新下拉；仅当正停在该页时切空态/内容态
+        if let Some(page) = self.gamepad_page.as_ref() {
+            page.set_devices(&self.gamepad_device_names(), self.gamepad_index);
+            let on_page = self
+                .ui
+                .stack
+                .visible_child_name()
+                .is_some_and(|n| n == "gamepad");
+            if on_page {
+                page.set_connected(!self.gamepads.is_empty());
+            }
+        }
+        self.ensure_input_reader();
+
         let total = pads.len();
         if announce && !added.is_empty() {
             let quoted: Vec<String> = added.iter().map(|p| format!("「{}」", p.name)).collect();
@@ -460,13 +634,23 @@ impl App {
 
     fn refresh_sidebar(&mut self) {
         self.syncing.set(true);
+        // 若当前停在「手柄状态」页，重建后恢复的是手柄状态行的选中状态，
+        // 而不是游戏行——否则一次列表刷新就会把选中切回游戏，页面被拽回配置页。
+        let on_gamepad = self.ui.stack.visible_child_name().as_deref() == Some("gamepad");
+        eprintln!("[SEL] refresh_sidebar on_gamepad={on_gamepad}");
         let rows = navigation::refresh_list(
             &self.ui.list_box,
             &self.ui.empty_label,
             &self.store,
-            self.selected.as_deref(),
+            if on_gamepad {
+                None
+            } else {
+                self.selected.as_deref()
+            },
             &|id| self.running.get(id).is_some_and(|s| !s.done),
         );
+        // 底部固定区的「手柄状态」行不在游戏列表里，remove_all() 动不到它，
+        // 恒贴侧栏视窗底部，这里无需重建（A8）。
         self.syncing.set(false);
         self.sidebar_rows = rows;
     }
@@ -475,6 +659,7 @@ impl App {
         if self.store.game_by_id(id).is_none() {
             return;
         }
+        eprintln!("[SEL] select_game({id})");
         self.sync_current_game();
         self.selected = Some(id.to_string());
         self.rebuild_config_page();
@@ -492,9 +677,11 @@ impl App {
         let name = format!("新游戏 #{}", self.store.len() + 1);
         let id = self.store.add_game(GameConfig::new(&name));
         self.selected = Some(id.clone());
-        self.refresh_sidebar();
+        // 先切回配置页再重建列表：refresh_sidebar 按「当前页」决定是否恢复游戏行选中，
+        // 若仍在手柄页会传 None，导致新行无高亮（且两个 ListBox 各存各的选中态）
         self.rebuild_config_page();
         self.show_content_page();
+        self.refresh_sidebar();
         self.set_status(&format!("已添加: {name}"), false);
         match self.store.save() {
             Ok(()) => self.dirty.set(false),
@@ -542,7 +729,8 @@ impl App {
             Some(self.store.games()[new_pos].id.clone())
         };
 
-        self.refresh_sidebar();
+        // 先切页（配置页 / 空态）再重建列表：refresh_sidebar 按「当前页」决定是否恢复
+        // 游戏行选中，顺序反了会让新选中的行没有高亮（两个 ListBox 各存各的选中态）
         if self.selected.is_some() {
             self.rebuild_config_page();
             self.show_content_page();
@@ -551,6 +739,7 @@ impl App {
             self.ui.config_bin.set_child(None::<&gtk::Widget>);
             self.show_welcome();
         }
+        self.refresh_sidebar();
         self.update_running_ui();
         self.set_status(&format!("已删除: {name}"), false);
 
@@ -807,11 +996,271 @@ impl App {
 
     // ─── 界面状态 ───────────────────────────────────────────────────────
 
-    fn show_welcome(&self) {
+    fn show_welcome(&mut self) {
+        eprintln!("[SEL] show_welcome");
+        // P5：同 show_content_page，切离「手柄状态」页先停振动（A15）
+        self.stop_rumble("离开手柄状态页");
+        // 底部固定区同步反选（页面已离开手柄状态）
+        self.ui
+            .gamepad_list_box
+            .select_row(None::<&gtk::ListBoxRow>);
         self.ui.stack.set_visible_child_name("welcome");
     }
 
-    fn show_content_page(&self) {
+    /// 切到「手柄状态」页（侧边栏底部入口，A8）。
+    fn show_gamepad_page(&mut self) {
+        eprintln!("[SEL] show_gamepad_page called");
+        if let Some(page) = self.gamepad_page.as_ref() {
+            let connected = !self.gamepads.is_empty();
+            page.set_connected(connected);
+            page.set_devices(&self.gamepad_device_names(), self.gamepad_index);
+        }
+        // set_devices 的 notify 会因重入保护（try_borrow_mut 失败）被丢弃，这里显式启动
+        self.ensure_input_reader();
+        // 两个 ListBox 各自独立保留选中态 → 进入手柄页时必须把游戏行反选，
+        // 否则「游戏行 + 手柄状态行」会同时高亮（选中只允许一条）。
+        self.ui.list_box.select_row(None::<&gtk::ListBoxRow>);
+        self.ui.stack.set_visible_child_name("gamepad");
+        // 底部固定区同步选中态（点击进入时已被选中，这里只兜底程序化切页的情况；
+        // 先判空再选，避免 row_selected 重入）
+        if self.ui.gamepad_list_box.selected_row().is_none() {
+            self.ui
+                .gamepad_list_box
+                .select_row(Some(&self.ui.gamepad_row));
+        }
+        if self.ui.split_view.is_collapsed() {
+            self.ui.split_view.set_show_content(true);
+        }
+        self.set_status("手柄状态", false);
+    }
+
+    /// 当前手柄的 event 节点（数值排序，与下拉、显示名同一顺序）。
+    fn gamepad_device_nodes(&self) -> Vec<String> {
+        let mut nodes: Vec<String> = self.gamepads.keys().cloned().collect();
+        nodes.sort_by_key(|n| {
+            n.rsplit("event")
+                .next()
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or(u32::MAX)
+        });
+        nodes
+    }
+
+    /// 当前已连接手柄的下拉显示名。
+    fn gamepad_device_names(&self) -> Vec<String> {
+        self.gamepad_device_nodes()
+            .iter()
+            .map(|n| {
+                let pad = &self.gamepads[n];
+                format!("{}（{}）", pad.name, pad.event_node)
+            })
+            .collect()
+    }
+
+    /// 下拉选中了第 i 个设备：P3 在这里启停读取线程。
+    fn on_device_selected(&mut self, index: usize) {
+        if self.gamepad_index == Some(index as u32) && self.gamepad_reader.is_some() {
+            return;
+        }
+        self.gamepad_index = Some(index as u32);
+        self.ensure_input_reader();
+    }
+
+    /// P3：为当前选中的设备启动读取线程；无设备 / 换设备时先停旧的。
+    ///
+    /// 读取线程通过 [`InputReader`] 自带的停止标志退出（≤16ms），不阻塞 UI（P3-5）。
+    fn ensure_input_reader(&mut self) {
+        let nodes = self.gamepad_device_nodes();
+        // 首次进入页面时 index 还是 None（set_devices 的 notify 因重入保护被丢弃），
+        // 这里兜底选中第一台；无设备则保持 None 并停掉读取。
+        if self.gamepad_index.is_none() && !nodes.is_empty() {
+            self.gamepad_index = Some(0);
+        }
+        let node = self
+            .gamepad_index
+            .and_then(|i| nodes.get(i as usize).cloned());
+        let Some(node) = node else {
+            self.stop_input_reader();
+            return;
+        };
+        if self.gamepad_node.as_deref() == Some(node.as_str()) {
+            return;
+        }
+        self.stop_input_reader();
+
+        let (rx, reader) = InputReader::spawn(&node);
+        self.gamepad_input_rx = Some(rx);
+        self.gamepad_reader = Some(reader);
+        self.gamepad_node = Some(node.clone());
+
+        // 主循环 16ms 抽一次通道（与读取线程合帧节奏一致，P3-4）
+        let me = self.me.clone();
+        let source = glib::timeout_add_local(Duration::from_millis(16), move || {
+            let alive = with_app_save(&me, |app| {
+                app.drain_input();
+                app.gamepad_reader.is_some()
+            })
+            .unwrap_or(false);
+            if alive {
+                glib::ControlFlow::Continue
+            } else {
+                glib::ControlFlow::Break
+            }
+        });
+        self.gamepad_input_source = Some(source);
+        if let Some(page) = self.gamepad_page.as_ref() {
+            page.set_info(&format!("读取中：{node}"));
+        }
+    }
+
+    /// P3：抽干输入通道并喂给页面（Ready / Frame / Disconnected）。
+    fn drain_input(&mut self) {
+        use std::sync::mpsc::TryRecvError;
+        let Some(rx) = self.gamepad_input_rx.take() else {
+            return;
+        };
+        loop {
+            match rx.try_recv() {
+                Ok(InputMsg::Ready { caps, snapshot }) => {
+                    if let Some(page) = self.gamepad_page.as_ref() {
+                        page.set_connected(true);
+                        page.set_info(&format!("{} · {}", caps.name, caps.node));
+                        // P5：无 FF_RUMBLE 就置灰并说明原因（A15「无能力置灰」）
+                        page.set_ff(
+                            caps.ff_rumble,
+                            if caps.ff_rumble {
+                                ""
+                            } else {
+                                "当前手柄未声明 FF_RUMBLE（EV_FF）能力，无法振动"
+                            },
+                        );
+                        page.update(Some(&caps), Some(&snapshot));
+                    }
+                }
+                Ok(InputMsg::Frame(snap)) => {
+                    if let Some(page) = self.gamepad_page.as_ref() {
+                        page.update(None, Some(&snap));
+                    }
+                }
+                Ok(InputMsg::Disconnected { node, reason }) => {
+                    self.stop_input_reader();
+                    if let Some(page) = self.gamepad_page.as_ref() {
+                        page.clear();
+                        page.set_connected(false);
+                        page.set_info("—");
+                    }
+                    self.set_status(&format!("手柄「{node}」读取终止：{reason}"), true);
+                    break;
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    self.stop_input_reader();
+                    break;
+                }
+            }
+        }
+        if self.gamepad_reader.is_some() {
+            self.gamepad_input_rx = Some(rx);
+        }
+    }
+
+    /// P3：停止读取（换设备 / 断开 / 退出时）。
+    fn stop_input_reader(&mut self) {
+        // P5：断开 / 切换 / 退出都必须先停振动（A15）
+        self.stop_rumble("设备断开或切换");
+        self.gamepad_ff = None;
+        if let Some(source) = self.gamepad_input_source.take() {
+            source.remove();
+        }
+        self.gamepad_reader = None; // Drop → 置停止标志，线程自行退出
+        self.gamepad_input_rx = None;
+        self.gamepad_node = None;
+    }
+
+    // ─── P5 振动测试（R3 / A15 / D8）───────────────────────────────────────
+
+    /// 按住马达按钮：上传效果并播放；1s 脉冲、2s 硬上限都会自动停。
+    ///
+    /// 设备侧的停止由 [`Self::stop_rumble`] 统一发；每次开始/停止都会推进
+    /// `rumble_epoch`，过期的定时器看到纪元变了就直接跳过，不会误停下一次。
+    fn on_rumble_press(&mut self, motor: Motor, pct: u8) {
+        let Some(node) = self.gamepad_node.clone() else {
+            eprintln!("[振动] 忽略：当前没有正在读取的手柄节点");
+            return;
+        };
+        // 写句柄懒打开：换过设备就重建（节点不同）
+        if self.gamepad_ff.as_ref().map(|w| w.node()) != Some(node.as_str()) {
+            match FfWriter::open(&node) {
+                Ok(w) => self.gamepad_ff = Some(w),
+                Err(e) => {
+                    eprintln!("[振动] 打开 {node} 失败：{e}");
+                    return;
+                }
+            }
+        }
+        let (strong, weak) = magnitudes(motor, pct);
+        let result = match self.gamepad_ff.as_mut() {
+            Some(w) => w.upload(strong, weak).and_then(|_| w.play()),
+            None => return,
+        };
+        if let Err(e) = result {
+            eprintln!("[振动] {} {pct}% 启动失败：{e}", motor.name());
+            return;
+        }
+        self.rumble_active = true;
+        self.rumble_epoch += 1;
+        let epoch = self.rumble_epoch;
+        eprintln!(
+            "[振动] 开始 · {} · 强度{pct}% · strong=0x{strong:04x} weak=0x{weak:04x} · 脉冲{PULSE_MS}ms / 硬停2000ms",
+            motor.name()
+        );
+
+        let me = self.me.clone();
+        let pulse = u64::from(PULSE_MS);
+        glib::timeout_add_local_once(std::time::Duration::from_millis(pulse), move || {
+            with_app(&me, |app| app.rumble_timeout(epoch, "1s 脉冲到时"));
+        });
+        let me = self.me.clone();
+        glib::timeout_add_local_once(std::time::Duration::from_millis(2000), move || {
+            with_app(&me, |app| app.rumble_timeout(epoch, "2s 硬上限到时"));
+        });
+    }
+
+    /// 松开按钮即停（A15「松开停」）。
+    fn on_rumble_release(&mut self) {
+        self.stop_rumble("松开按钮");
+    }
+
+    /// 定时停：只有纪元没变（没有被松开 / 重新按压顶掉）才真正停。
+    fn rumble_timeout(&mut self, epoch: u64, why: &str) {
+        if self.rumble_epoch == epoch {
+            self.stop_rumble(why);
+        }
+    }
+
+    /// 停止当前振动（幂等）：发停止命令并作废所有待触发的定时停。
+    fn stop_rumble(&mut self, why: &str) {
+        self.rumble_epoch += 1;
+        if !self.rumble_active {
+            return;
+        }
+        self.rumble_active = false;
+        if let Some(w) = self.gamepad_ff.as_ref()
+            && let Err(e) = w.stop()
+        {
+            eprintln!("[振动] 停止失败：{e}");
+        }
+        eprintln!("[振动] 停止 · {why}");
+    }
+
+    fn show_content_page(&mut self) {
+        eprintln!("[SEL] show_content_page");
+        // P5：离开「手柄状态」页即停振动（A15）；不在该页时本调用为空操作
+        self.stop_rumble("离开手柄状态页");
+        // 底部固定区同步反选，高亮回到当前游戏行
+        self.ui
+            .gamepad_list_box
+            .select_row(None::<&gtk::ListBoxRow>);
         self.ui.stack.set_visible_child_name("config");
         if self.ui.split_view.is_collapsed() {
             self.ui.split_view.set_show_content(true);
@@ -979,6 +1428,8 @@ pub fn shutdown() {
             if let Some(source) = app.gamepad_source.take() {
                 source.remove();
             }
+            // P3:手柄状态页的读取线程与定时器也要停干净
+            app.stop_input_reader();
             for (_, mut state) in app.running.drain() {
                 if !state.done {
                     let pid = state.child.id() as i32;

@@ -25,6 +25,7 @@ This project aims to create a high-performance, high-stability Proton game manag
 - **Native GNOME UI** — GTK4 + libadwaita widgets, follows the system light/dark theme, collapses to stack navigation on narrow windows
 - **Gamepad Status** — Bottom-right indicator shows the number of connected gamepads; open the card for each pad's name, protocol (Xbox 360 / Xbox One / Xbox Series X|S / PS4 / PS5 / Nintendo), `/dev/input` node, vendor:product ID, input ID, bus, kernel driver, serial/MAC, physical path, button/axis counts and force-feedback support
   - Connecting or disconnecting a pad while the app is open pops a desktop notification plus an in-app toast; events while the app is closed produce no notification — the next launch simply shows the current state (no background daemon)
+- **Controller Status Page** — Entry fixed at the very bottom of the sidebar (with a separator above): switch between multiple pads via a device dropdown; live button/stick/trigger animation; travel equivalence (normalized 0–100% + scale bar + raw value/range); left/right motor rumble test (30% default intensity, 1s single pulse, 2s hard auto-stop; stops immediately on page switch/disconnect/quit); trigger rumble greyed out with an explanation due to upstream kernel driver limits; offline self-test with `/dev/uinput` virtual pads (`scripts/uinput_pad.py`)
 - **Persistent Config** — JSON format, saved to `~/.config/proton-launch/games.json`
 
 ## Dependencies
