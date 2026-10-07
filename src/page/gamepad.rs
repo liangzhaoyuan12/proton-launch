@@ -9,9 +9,11 @@
 //! - P4：键程当量（归一化数值 + 刻度条）
 //! - P5：振动测试（左右马达 + 扳机）
 //!
-//! 注：本页不写单元测试——构造 GTK 控件需要 `gtk::init`，会与
+//! 注：本页不写「构造 GTK 控件」的单元测试——那需要 `gtk::init`，会与
 //! `widgets::gamepad_indicator` 的显示测试抢全局初始化；几何与换算的单测在
 //! [`crate::widgets::gamepad_viz`] 与 [`crate::utils::gamepad_input`]。
+//! 纯 cairo 的离屏渲染测试（[`tests::输入状态_摇杆表盘外不出现飞线`]）不碰控件、
+//! 不需要显示连接，只校验 `draw_viz` 的绘制结果。
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -745,6 +747,10 @@ fn draw_viz(cr: &gtk::cairo::Context, state: &VizState, w: f64, h: f64) {
         (w * 0.72, h * 0.50, gamepad_viz::STICK_RIGHT, "右摇杆"),
     ];
     for (cx, cy, axes, name) in centers {
+        // 关键：标签的 `move_to` 会留下一个悬空当前点（`show_text` 不动路径），
+        // 而 cairo 的 `arc` 会从当前点连一条直线到弧的起点 —— 那就是摇杆上的
+        // 「飞线」。先清干净路径再画圆盘。
+        cr.new_path();
         cr.set_line_width(2.0);
         cr.set_source_rgb(DIAL.0, DIAL.1, DIAL.2);
         cr.arc(cx, cy, dial_r, 0.0, std::f64::consts::TAU);
@@ -826,5 +832,129 @@ fn percent_of(caps: &DeviceCaps, axes: &BTreeMap<u16, i32>, code: u16) -> f64 {
             info.percent(raw)
         }
         None => 50.0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::utils::gamepad_input::AxisInfo;
+
+    /// 离屏画布尺寸（与页面 `content_height(200)` 一致，宽取够用即可）。
+    const W: i32 = 939;
+    const H: i32 = 200;
+
+    /// 造一个「标准 Xbox 布局 + 六轴」的设备能力（复刻出问题的那张截图的设备）。
+    fn test_caps() -> DeviceCaps {
+        let stick = |code: u16| AxisInfo {
+            code,
+            name: format!("ABS_{code}"),
+            min: -32768,
+            max: 32767,
+            fuzz: 0,
+            flat: 16,
+            resolution: 0,
+        };
+        let trigger = |code: u16| AxisInfo {
+            code,
+            name: format!("ABS_{code}"),
+            min: 0,
+            max: 1023,
+            fuzz: 0,
+            flat: 0,
+            resolution: 0,
+        };
+        DeviceCaps {
+            node: "/dev/input/event0".into(),
+            name: "测试手柄".into(),
+            axes: [0u16, 1, 3, 4]
+                .into_iter()
+                .map(|c| (c, stick(c)))
+                .chain([(0x02u16, trigger(0x02)), (0x05, trigger(0x05))])
+                .collect(),
+            buttons: [
+                0x130, 0x131, 0x134, 0x133, 0x136, 0x137, 0x13a, 0x13b, 0x13c, 0x13d, 0x13e,
+            ]
+            .to_vec(),
+            ff_rumble: false,
+        }
+    }
+
+    /// 把 `draw_viz` 画到离屏 ARGB32 位图上，返回像素（含行距 stride）。
+    /// 纯 cairo，不需要 `gtk::init` / 显示连接。
+    fn render(state: &VizState) -> (Vec<u8>, usize) {
+        let mut surface =
+            gtk::cairo::ImageSurface::create(gtk::cairo::Format::ARgb32, W, H).expect("离屏位图");
+        {
+            let cr = gtk::cairo::Context::new(&surface).expect("cairo 上下文");
+            draw_viz(&cr, state, W as f64, H as f64);
+        }
+        surface.flush();
+        let stride = surface.stride() as usize;
+        let data = surface.data().expect("读回像素").to_vec();
+        (data, stride)
+    }
+
+    /// 回归测试：输入状态画布上，摇杆表盘之外不该出现任何表盘配色的杂散像素
+    /// （用户看到的「两条飞线」：最后一个按键标签的 `move_to` 悬空点 → 左表盘弧起点、
+    /// 左摇杆标签的 `move_to` 悬空点 → 右表盘弧起点）。
+    #[test]
+    fn 输入状态_摇杆表盘外不出现飞线() {
+        let state = VizState {
+            caps: Some(test_caps()),
+            // 左摇杆压到 81%（复刻截图），右摇杆居中，扳机各按一点
+            axes: [
+                (0x00, 19_000),
+                (0x01, 0),
+                (0x03, 0),
+                (0x04, 0),
+                (0x02, 64),
+                (0x05, 191),
+            ]
+            .into_iter()
+            .collect(),
+            ..VizState::default()
+        };
+
+        let (data, stride) = render(&state);
+
+        let dial_r = (H as f64 * 0.30).min(52.0);
+        let centers = [W as f64 * 0.55, W as f64 * 0.72];
+        let cy = H as f64 * 0.50;
+        // 表盘描边配色 `DIAL` = (0.42, 0.42, 0.46)，取「线芯满色」±2：
+        // 飞线是 2px 描边，中间一列必定是满色；而文字抗锯齿的混色
+        //（`DIM` 或白色 × 背景）r/g 落不进 107±2，不会误报。
+        let is_dial = |r: i32, g: i32, b: i32| {
+            (r - 107).abs() <= 2 && (g - 107).abs() <= 2 && (b - 117).abs() <= 2
+        };
+
+        let (mut on_dial, mut stray) = (0usize, 0usize);
+        let mut stray_px = Vec::new();
+        for y in 0..H as usize {
+            for x in 0..W as usize {
+                let i = y * stride + x * 4;
+                let (b, g, r) = (data[i] as i32, data[i + 1] as i32, data[i + 2] as i32);
+                if !is_dial(r, g, b) {
+                    continue;
+                }
+                let d = centers
+                    .iter()
+                    .map(|cx| ((x as f64 - cx).powi(2) + (y as f64 - cy).powi(2)).sqrt())
+                    .filter(|d| (d - dial_r).abs() <= 4.0)
+                    .count();
+                if d > 0 {
+                    on_dial += 1;
+                } else {
+                    stray += 1;
+                    stray_px.push((x, y, r, g, b));
+                }
+            }
+        }
+        // 先自证「确实画出了表盘」，否则 stray=0 可能只是什么都没画
+        assert!(on_dial > 100, "表盘描边没画出来？on_dial={on_dial}");
+        assert_eq!(
+            stray, 0,
+            "表盘外出现 {stray} 个表盘配色像素（就是那两条飞线）: {stray_px:?}"
+        );
     }
 }
