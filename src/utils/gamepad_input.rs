@@ -255,6 +255,7 @@ pub fn key_name(code: u16) -> String {
         0x221 => "BTN_DPAD_DOWN",
         0x222 => "BTN_DPAD_LEFT",
         0x223 => "BTN_DPAD_RIGHT",
+        0x8b => "KEY_MENU",
         0x100 => "BTN_TRIGGER",
         0x101 => "BTN_TOP",
         0x102 => "BTN_PINKIE",

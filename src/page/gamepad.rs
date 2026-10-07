@@ -725,7 +725,7 @@ fn draw_viz(cr: &gtk::cairo::Context, state: &VizState, w: f64, h: f64) {
     let pad = 8.0;
     let grid_w = (w * 0.42 - pad).max(40.0);
     let grid_h = (h - pad * 2.0).max(40.0);
-    let buttons = gamepad_viz::present_buttons(caps, &state.pressed);
+    let buttons = gamepad_viz::present_buttons(caps, &state.pressed, &state.axes);
     let cells = gamepad_viz::button_grid(buttons.len(), gamepad_viz::BUTTON_COLS, grid_w, grid_h);
     cr.set_font_size(10.0);
     for ((_, label, down), cell) in buttons.iter().zip(cells.iter()) {
@@ -893,6 +893,102 @@ mod tests {
         let stride = surface.stride() as usize;
         let data = surface.data().expect("读回像素").to_vec();
         (data, stride)
+    }
+
+    /// 「蓝牙 Xbox（HID 索引式）」能力：`scripts/evdev_probe.py /dev/input/event24`
+    /// 实测的键集 `0x130..0x139 + KEY_MENU(0x8b)`，轴含 `ABS_HAT0X/Y` 十字键。
+    fn hid_index_caps() -> DeviceCaps {
+        let mut caps = test_caps();
+        caps.name = "Xbox Wireless Controller".into();
+        caps.node = "/dev/input/event24".into();
+        caps.buttons = (0x130..=0x139).chain(std::iter::once(0x8b)).collect();
+        for code in [0x10u16, 0x11] {
+            caps.axes.insert(
+                code,
+                AxisInfo {
+                    code,
+                    name: format!("ABS_{code:#04x}"),
+                    min: -1,
+                    max: 1,
+                    fuzz: 0,
+                    flat: 0,
+                    resolution: 0,
+                },
+            );
+        }
+        caps
+    }
+
+    /// 24bpp BMP 落盘（纯 std，不引依赖）：ARGB32 是行优先 BGRA，转 BGR、倒序写行。
+    fn write_bmp(path: &str, data: &[u8], stride: usize, w: i32, h: i32) {
+        let (w, h) = (w as usize, h as usize);
+        let row_bytes = (w * 3 + 3) & !3;
+        let img_size = row_bytes * h;
+        let file_size = 54 + img_size;
+        let mut out = Vec::with_capacity(file_size);
+        out.extend_from_slice(b"BM");
+        out.extend_from_slice(&(file_size as u32).to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes());
+        out.extend_from_slice(&54u32.to_le_bytes());
+        out.extend_from_slice(&40u32.to_le_bytes());
+        out.extend_from_slice(&(w as i32).to_le_bytes());
+        out.extend_from_slice(&(h as i32).to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&24u16.to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes());
+        out.extend_from_slice(&(img_size as u32).to_le_bytes());
+        out.extend_from_slice(&2835u32.to_le_bytes());
+        out.extend_from_slice(&2835u32.to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes());
+        for y in (0..h).rev() {
+            let start = out.len();
+            for x in 0..w {
+                let i = y * stride + x * 4;
+                out.push(data[i]);
+                out.push(data[i + 1]);
+                out.push(data[i + 2]);
+            }
+            while out.len() - start < row_bytes {
+                out.push(0);
+            }
+        }
+        std::fs::write(path, out).expect("写 BMP");
+    }
+
+    /// 证据导出（可选）：`VIZ_BMP=…/x.bmp cargo test 画布快照_hid索引手柄`
+    /// 会把离屏画布存成位图，供人工核对格子文字；不设环境变量时只跑断言。
+    ///
+    /// 断言部分就是用户报的 bug：`0x134` 在蓝牙手柄上是**物理 LB**，
+    /// 必须显示成「LB」且按下点亮（语义表会错标成「X」）。
+    #[test]
+    fn 画布快照_hid索引手柄15格且按下格点亮() {
+        let state = VizState {
+            caps: Some(hid_index_caps()),
+            // 十字键打「上」；物理 LB（键码 0x134）按下
+            axes: [(0x10, 0), (0x11, -1)].into_iter().collect(),
+            pressed: [0x134u16].into_iter().collect(),
+            ..VizState::default()
+        };
+
+        let caps = state.caps.as_ref().expect("caps");
+        let present = gamepad_viz::present_buttons(caps, &state.pressed, &state.axes);
+        assert_eq!(
+            present.len(),
+            15,
+            "15 格：10 个位域键 + Guide + 十字键 4 格"
+        );
+        let lb = present.iter().find(|c| c.0 == 0x134).expect("LB 格缺失");
+        assert_eq!(lb.1, "LB", "0x134 在 HID 索引式下是物理 LB");
+        assert!(lb.2, "按下的格子应点亮");
+        let up = present.iter().find(|c| c.0 == 0x220).expect("上 格缺失");
+        assert!(up.2, "HAT0Y=-1 应点亮「上」");
+
+        if let Ok(path) = std::env::var("VIZ_BMP") {
+            let (data, stride) = render(&state);
+            write_bmp(&path, &data, stride, W, H);
+            println!("画布已导出：{path}");
+        }
     }
 
     /// 回归测试：输入状态画布上，摇杆表盘之外不该出现任何表盘配色的杂散像素

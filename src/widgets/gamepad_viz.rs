@@ -43,6 +43,70 @@ pub const BUTTONS: &[(u16, &str)] = &[
     (0x223, "右"),
 ];
 
+/// HID 索引式手柄的展示表（见 [`Convention::HidIndex`]）。
+///
+/// 蓝牙 Xbox（`hid-microsoft`）/ `hid-generic` 走内核 `hid-input.c` 的默认映射：
+/// **键码 = `0x130 + (HID usage − 1)`**，而 Xbox 描述符的 usage 顺序是
+/// A、B、X、Y、LB、RB、Back、Start、LS、RS，于是 `0x132`（`BTN_C`）其实是 **X**、
+/// `0x134`（`BTN_WEST`）其实是 **LB** —— 按语义表显示就会「缺键 + 亮错格」。
+///
+/// 顺序按标准 Xbox 网格排：`A B X Y LB / RB Back Start LS RS / Guide 上 下 左 右`。
+pub const HID_INDEX_BUTTONS: &[(u16, &str)] = &[
+    (0x130, "A"),
+    (0x131, "B"),
+    (0x132, "X"),
+    (0x133, "Y"),
+    (0x134, "LB"),
+    (0x135, "RB"),
+    (0x136, "Back"),
+    (0x137, "Start"),
+    (0x138, "LS"),
+    (0x139, "RS"),
+    // usage 11（11 键以上的 HID 手柄）
+    (0x13a, "Guide"),
+    // `KEY_MENU`：Xbox 蓝牙导引键走 System「Sys Main Menu」→ 内核映射为 `KEY_MENU`
+    // （SDL3 内置映射表对本机 `050000005e040000e002000003090000` 就是 `guide:b10`，
+    //  b10 = 唯一一个小于 `BTN_JOYSTICK` 的键，即 `0x8b`）
+    (0x08b, "Guide"),
+    (0x220, "上"),
+    (0x221, "下"),
+    (0x222, "左"),
+    (0x223, "右"),
+];
+
+/// 按键码约定：决定 code → 标签用哪张表。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Convention {
+    /// 语义式：`xpad`（USB Xbox）/ uinput 虚拟手柄按内核
+    /// `Documentation/input/gamepad.rst` 的**物理位置**命名
+    /// （`BTN_SOUTH=A`、`BTN_EAST=B`、`BTN_WEST=X`、`BTN_NORTH=Y`、
+    /// `BTN_TL=LB`、`BTN_SELECT=Back`…），见 [`BUTTONS`]。
+    Semantic,
+    /// HID 索引式：`hid-generic` / `hid-microsoft`（蓝牙 Xbox）按 usage 序号给键码，
+    /// 见 [`HID_INDEX_BUTTONS`]。
+    HidIndex,
+}
+
+/// 判定设备用哪种按键码约定。
+///
+/// 判据是能力集合本身：
+/// - `BTN_C(0x132)` / `BTN_Z(0x135)` 只会出现在「usage 序号 = 键码」的设备上 ——
+///   语义式的现代手柄（`xpad` 的 Xbox360/One）从不声明它们；
+/// - 语义式的「完整集」（`BTN_SELECT + BTN_THUMBL + BTN_THUMBR`）同时出现时判语义式：
+///   这覆盖注册了整个 `BTN` 段的 uinput 虚拟手柄与 `xpad` 的原始 Xbox 分支。
+///
+/// 局限：既带 `BTN_C` 又带完整语义集的**真·15 键 HID 手柄**（usage 1..15）会判成语义式，
+/// 与修复前行为一致；靠总线/驱动名才能再细分，暂不引入。
+pub fn convention(caps: &DeviceCaps) -> Convention {
+    let index_like = caps.has_button(0x132) || caps.has_button(0x135);
+    let semantic_core = caps.has_button(0x13a) && caps.has_button(0x13d) && caps.has_button(0x13e);
+    if index_like && !semantic_core {
+        Convention::HidIndex
+    } else {
+        Convention::Semantic
+    }
+}
+
 /// 按键区默认列数（P3-1：5 列 ×3 行）。
 pub const BUTTON_COLS: usize = 5;
 
@@ -128,17 +192,61 @@ pub fn trigger_height(pct: f64, height: f64) -> f64 {
 
 /// 设备没暴露的轴/按键要优雅降级（P4-3 / P3-1）：算出**实际存在**的展示项。
 ///
-/// 标准15键用 [`BUTTONS`] 的友好名；未映射但**正被按下**的按键按
-/// [`key_name`](crate::utils::gamepad_input::key_name) 回退显示
-/// （`BTN_XXX` / `KEY_0x??`），保证「所有输入」都不漏。
-pub fn present_buttons(caps: &DeviceCaps, pressed: &BTreeSet<u16>) -> Vec<(u16, String, bool)> {
-    let mut out: Vec<(u16, String, bool)> = BUTTONS
+/// 标签按设备的按键码约定（[`convention`]）选表：语义式用 [`BUTTONS`]、
+/// HID 索引式用 [`HID_INDEX_BUTTONS`]（否则蓝牙 Xbox 会缺键、亮错格）。
+///
+/// - 十字键：设备声明了 `BTN_DPAD_*` 就按声明显示；只有 `ABS_HAT0X/Y` 时按轴值
+///   合成（`-1` = 上/左、`+1` = 下/右，内核 hat 约定），中立位也占格（暗格）。
+/// - 展示表里没有、但**正被按下**的按键按
+///   [`key_name`](crate::utils::gamepad_input::key_name) 回退补位
+///   （`BTN_XXX` / `KEY_0x??`），保证「所有输入」都不漏。
+pub fn present_buttons(
+    caps: &DeviceCaps,
+    pressed: &BTreeSet<u16>,
+    axes: &BTreeMap<u16, i32>,
+) -> Vec<(u16, String, bool)> {
+    let table = match convention(caps) {
+        Convention::Semantic => BUTTONS,
+        Convention::HidIndex => HID_INDEX_BUTTONS,
+    };
+
+    // 十字键可用性：有 BTN_DPAD_* 用声明的；有 HAT 轴则合成
+    let dpad_declared = [0x220u16, 0x221, 0x222, 0x223]
         .iter()
-        .filter(|(code, _)| caps.has_button(*code) || pressed.contains(code))
-        .map(|(code, label)| (*code, (*label).to_string(), pressed.contains(code)))
-        .collect();
+        .any(|c| caps.has_button(*c));
+    let hat = caps.has_axis(0x10) || caps.has_axis(0x11);
+    let dpad_shown = dpad_declared || hat;
+
+    let mut down = pressed.clone();
+    if !dpad_declared && hat {
+        if let Some(x) = axes.get(&0x10) {
+            if *x < 0 {
+                down.insert(0x222); // 左
+            } else if *x > 0 {
+                down.insert(0x223); // 右
+            }
+        }
+        if let Some(y) = axes.get(&0x11) {
+            if *y < 0 {
+                down.insert(0x220); // 上
+            } else if *y > 0 {
+                down.insert(0x221); // 下
+            }
+        }
+    }
+
+    let mut out: Vec<(u16, String, bool)> = Vec::new();
+    let mut seen = BTreeSet::new();
+    for &(code, label) in table {
+        let is_dpad = (0x220..=0x223).contains(&code);
+        if !(caps.has_button(code) || down.contains(&code) || (is_dpad && dpad_shown)) {
+            continue;
+        }
+        out.push((code, (*label).to_string(), down.contains(&code)));
+        seen.insert(code);
+    }
     for code in pressed {
-        if !out.iter().any(|(c, _, _)| c == code) {
+        if seen.insert(*code) {
             out.push((*code, crate::utils::gamepad_input::key_name(*code), true));
         }
     }
@@ -287,7 +395,7 @@ mod tests {
         assert!(!stick_available(&caps, STICK_LEFT));
         assert!(!stick_available(&caps, STICK_RIGHT));
         // 只画得出手柄声明过的按键
-        let present = present_buttons(&caps, &BTreeSet::new());
+        let present = present_buttons(&caps, &BTreeSet::new(), &BTreeMap::new());
         assert_eq!(
             present.iter().map(|c| c.0).collect::<Vec<_>>(),
             vec![0x130, 0x131]
@@ -295,8 +403,117 @@ mod tests {
         // 即便 caps 未声明，正在按下的键也要显示（运行期事件优先）
         let mut pressed = BTreeSet::new();
         pressed.insert(0x13d); // LS
-        let present = present_buttons(&caps, &pressed);
+        let present = present_buttons(&caps, &pressed, &BTreeMap::new());
         assert!(present.iter().any(|c| c.0 == 0x13d && c.2));
+    }
+
+    /// 造一个「蓝牙 Xbox 真手柄」能力：`scripts/evdev_probe.py /dev/input/event24`
+    /// 实测的 10 个 `BTN_*` + `KEY_MENU(0x8b)` + HAT 十字键 + 摇杆/扳机轴。
+    fn xbox_bt_caps() -> DeviceCaps {
+        let axis_codes = [
+            (0x00, -32768, 32767, 4095),
+            (0x01, -32768, 32767, 4095),
+            (0x02, 0, 1023, 0),
+            (0x03, -32768, 32767, 4095),
+            (0x04, -32768, 32767, 4095),
+            (0x05, 0, 1023, 0),
+            (0x10, -1, 1, 0),
+            (0x11, -1, 1, 0),
+        ];
+        DeviceCaps {
+            name: "Xbox Wireless Controller".into(),
+            node: "/dev/input/event24".into(),
+            axes: axis_codes
+                .into_iter()
+                .map(|(code, min, max, flat)| (code, axis(code, min, max, 0, flat)))
+                .collect(),
+            buttons: (0x130..=0x139).chain(std::iter::once(0x8b)).collect(),
+            ff_rumble: true,
+        }
+    }
+
+    #[test]
+    fn 索引式蓝牙手柄_标签正确且格子齐全() {
+        let caps = xbox_bt_caps();
+        assert_eq!(convention(&caps), Convention::HidIndex);
+
+        let present = present_buttons(&caps, &BTreeSet::new(), &BTreeMap::new());
+        let label = |code: u16| {
+            present
+                .iter()
+                .find(|c| c.0 == code)
+                .map(|c| c.1.clone())
+                .unwrap_or_else(|| format!("缺失 {code:#05x}"))
+        };
+        // 内核按 usage 序号给键码，必须按 HID 表显示（用户报告的「亮错格」）
+        assert_eq!(label(0x130), "A");
+        assert_eq!(label(0x131), "B");
+        assert_eq!(label(0x132), "X"); // BTN_C 其实是 X
+        assert_eq!(label(0x133), "Y");
+        assert_eq!(label(0x134), "LB"); // BTN_WEST 其实是 LB（语义表会错标成 X）
+        assert_eq!(label(0x135), "RB"); // BTN_Z 其实是 RB
+        assert_eq!(label(0x136), "Back"); // BTN_TL 其实是 Back（语义表会错标成 LB）
+        assert_eq!(label(0x137), "Start");
+        assert_eq!(label(0x138), "LS"); // BTN_TL2 其实是 LS 按下
+        assert_eq!(label(0x139), "RS");
+        assert_eq!(label(0x08b), "Guide"); // KEY_MENU = Xbox 导引键
+        // 10 个位域键 + Guide + 十字键 4 格 = 15（5 列正好 3 行）
+        assert_eq!(present.len(), 15);
+    }
+
+    #[test]
+    fn 语义式_虚拟手柄标签保持不变() {
+        // uinput 虚拟手柄注册了整个 BTN 段（0x130..=0x13e），仍要判成语义式
+        let caps = DeviceCaps {
+            name: "手柄A 测试".into(),
+            node: "/dev/input/event23".into(),
+            axes: [(0x10, -1, 1), (0x11, -1, 1)]
+                .into_iter()
+                .map(|(code, min, max)| (code, axis(code, min, max, 0, 0)))
+                .collect(),
+            buttons: (0x130..=0x13e).collect(),
+            ff_rumble: false,
+        };
+        assert_eq!(convention(&caps), Convention::Semantic);
+
+        let present = present_buttons(&caps, &BTreeSet::new(), &BTreeMap::new());
+        let label = |code: u16| {
+            present
+                .iter()
+                .find(|c| c.0 == code)
+                .map(|c| c.1.clone())
+                .unwrap_or_else(|| format!("缺失 {code:#05x}"))
+        };
+        assert_eq!(label(0x134), "X");
+        assert_eq!(label(0x136), "LB");
+        assert_eq!(label(0x13a), "Back");
+        assert_eq!(label(0x13c), "Guide");
+        // 11 个标准键 + 十字键 4 格；语义表没收录的 C/Z/TL2/TR2 不常驻（按到才补位）
+        assert_eq!(present.len(), 15);
+    }
+
+    #[test]
+    fn 十字键_轴合成_中立占格按下才亮() {
+        let caps = xbox_bt_caps();
+        let empty = BTreeSet::new();
+
+        // 中立位：四个格子都在（暗格），不闪不跳
+        let present = present_buttons(&caps, &empty, &BTreeMap::new());
+        for code in [0x220, 0x221, 0x222, 0x223] {
+            let cell = present
+                .iter()
+                .find(|c| c.0 == code)
+                .expect("十字键格子缺失");
+            assert!(!cell.2, "{code:#05x} 中立位不该亮");
+        }
+
+        // 按「上 + 左」（HAT 值 -1 = 上/左，+1 = 下/右）
+        let axes: BTreeMap<u16, i32> = [(0x10, -1), (0x11, -1)].into_iter().collect();
+        let present = present_buttons(&caps, &empty, &axes);
+        assert!(present.iter().any(|c| c.0 == 0x220 && c.2), "上 没亮");
+        assert!(present.iter().any(|c| c.0 == 0x222 && c.2), "左 没亮");
+        assert!(!present.iter().any(|c| c.0 == 0x221 && c.2), "下 不该亮");
+        assert!(!present.iter().any(|c| c.0 == 0x223 && c.2), "右 不该亮");
     }
 
     /// 造一个 `AxisInfo`（测试用）。
